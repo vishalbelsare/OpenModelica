@@ -53,6 +53,7 @@ getComponentsTestOF.mos \
 getDefinitions.mos \
 getDialogAnnotation.mos \
 getElementAnnotation.mos \
+getExtendsModifierNames.mos \
 getIconAnnotation.mos \
 getInheritedClasses1.mos \
 getInheritedClasses2.mos \
@@ -71,7 +72,11 @@ interactive_api_loadsave.mos \
 interactive_api_param.mos \
 interactive_api_simulations.mos \
 interactive_test.mos \
+isConstant.mos \
 isExperiment.mos \
+isParameter.mos \
+isPrimitive.mos \
+isProtected.mos \
 isRedeclare.mos \
 isReplaceable.mos \
 Issue7544.mos \

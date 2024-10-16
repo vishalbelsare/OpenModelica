@@ -986,6 +986,74 @@ algorithm
   end matchcontinue;
 end getElementModifierNames;
 
+function getExtendsModifierNames
+  "Return the modifier names of a modification on an extends clause.
+   For instance,
+     model test extends A(p1=3,p2(z=3));end test;
+     getExtendsModifierNames(test,A) => {p1,p2.z}
+  "
+  input Absyn.Path classPath;
+  input Absyn.Path extendsPath;
+  input Boolean useQuotes;
+  input Absyn.Program program;
+  output Values.Value result;
+protected
+  Absyn.Class cdef;
+  list<Absyn.ElementSpec> exts;
+  GraphicEnvCache env;
+  list<Absyn.ElementArg> extmod;
+  list<String> res;
+  String res_str;
+  Boolean silent = not Flags.isSet(Flags.NF_API_NOISE);
+algorithm
+  if silent then
+    ErrorExt.setCheckpoint(getInstanceName());
+  end if;
+
+  try
+    cdef := InteractiveUtil.getPathedClassInProgram(classPath, program);
+    exts := InteractiveUtil.getExtendsElementspecInClass(cdef);
+
+    if hasModifiers(exts) then
+      env := Interactive.getClassEnv(program, classPath);
+      exts := list(Interactive.makeExtendsFullyQualified(e, env) for e in exts);
+      {Absyn.EXTENDS(elementArg = extmod)} := List.select1(exts, Interactive.extendsElementspecNamed, extendsPath);
+      res := getModificationNames(extmod, includeRedeclares = true);
+
+      if useQuotes then
+        res := Interactive.insertQuotesToList(res);
+      end if;
+    else
+      res := {};
+    end if;
+
+    result := ValuesUtil.makeArray(list(ValuesUtil.makeCodeTypeName(AbsynUtil.makeIdentPathFromString(s)) for s in res));
+  else
+    result := ValuesUtil.makeString("Error");
+  end try;
+
+  if silent then
+    ErrorExt.rollBack(getInstanceName());
+  end if;
+end getExtendsModifierNames;
+
+function hasModifiers
+  input list<Absyn.ElementSpec> exts;
+  output Boolean b = false;
+protected
+   Absyn.ElementSpec ext;
+algorithm
+  for e in exts loop
+    b := match e
+      case ext as Absyn.EXTENDS() then not listEmpty(ext.elementArg);
+      else false;
+    end match;
+    if b then
+      break;
+    end if;
+  end for;
+end hasModifiers;
+
 protected function getModificationNames
 "Helper function to getElementModifierNames"
   input list<Absyn.ElementArg> inAbsynElementArgLst;
@@ -6106,6 +6174,49 @@ algorithm
     success := false;
   end try;
 end setElementType;
+
+function makeCommentFromArgs
+  input Absyn.Exp commentExp;
+  input Absyn.Exp annotationExp;
+  output Option<Absyn.Comment> comment;
+protected
+  Option<Absyn.Annotation> ann;
+  Option<String> cmt;
+algorithm
+  cmt := match commentExp
+    case Absyn.Exp.TUPLE(expressions = {}) then NONE();
+    case Absyn.Exp.STRING() then SOME(commentExp.value);
+  end match;
+
+  ann := match annotationExp
+    case Absyn.Exp.TUPLE(expressions = {}) then NONE();
+    else SOME(Absyn.Annotation.ANNOTATION({recordConstructorToModification(annotationExp)}));
+  end match;
+
+  if isSome(cmt) or isSome(ann) then
+    comment := SOME(Absyn.Comment.COMMENT(ann, cmt));
+  else
+    comment := NONE();
+  end if;
+end makeCommentFromArgs;
+
+function makeModifierFromArgs
+  input Absyn.Exp bindingExp;
+  input Absyn.Modification modifier;
+  input SourceInfo info;
+  output Option<Absyn.Modification> outModifier;
+algorithm
+  outModifier := match (bindingExp, modifier)
+    // No binding, no modifier.
+    case (Absyn.Exp.TUPLE(expressions = {}), Absyn.Modification.CLASSMOD(elementArgLst = {})) then NONE();
+    // Only modifier.
+    case (Absyn.Exp.TUPLE(expressions = {}), _) then SOME(modifier);
+    // Binding, maybe modifier.
+    case (_, Absyn.Modification.CLASSMOD())
+      then SOME(Absyn.Modification.CLASSMOD(modifier.elementArgLst,
+                  Absyn.EqMod.EQMOD(bindingExp, info)));
+  end match;
+end makeModifierFromArgs;
 
 annotation(__OpenModelica_Interface="backend");
 end InteractiveUtil;

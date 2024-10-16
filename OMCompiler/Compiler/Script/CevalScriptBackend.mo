@@ -1769,7 +1769,7 @@ algorithm
       DAE.Type tp;
       Absyn.Class absynClass;
       Absyn.ClassDef cdef;
-      Absyn.Exp aexp;
+      Absyn.Exp aexp, aexp2, aexp3;
       Option<DAE.DAElist> odae;
       Values.Value v,cvar,cvar2,v1,v2;
       Absyn.ComponentRef cr;
@@ -2551,6 +2551,15 @@ algorithm
       then
         Values.STRING(str2);
 
+    case ("setParameterValue", {Values.CODE(Absyn.C_TYPENAME(classpath)),
+        Values.CODE(Absyn.C_TYPENAME(path)), Values.CODE(Absyn.C_EXPRESSION(aexp))})
+      algorithm
+        (p, b) := InteractiveUtil.setElementModifier(classpath, path,
+          Absyn.Modification.CLASSMOD({}, Absyn.EqMod.EQMOD(aexp, AbsynUtil.dummyInfo)), SymbolTable.getAbsyn());
+        SymbolTable.setAbsyn(p);
+      then
+        ValuesUtil.makeBoolean(b);
+
     case ("getComponentModifierNames",{Values.CODE(Absyn.C_TYPENAME(path)),Values.STRING(str1)})
       equation
         strings = Interactive.getComponentModifierNames(path, str1, SymbolTable.getAbsyn());
@@ -3106,6 +3115,60 @@ algorithm
       then
         Values.BOOL(b);
 
+    case ("getExtendsModifierNames",
+          {Values.CODE(Absyn.C_TYPENAME(classpath)), Values.CODE(Absyn.C_TYPENAME(path)), Values.BOOL(b)})
+      then InteractiveUtil.getExtendsModifierNames(classpath, path, b, SymbolTable.getAbsyn());
+
+    case ("isPrimitive", {Values.CODE(Absyn.C_TYPENAME(classpath))})
+      then ValuesUtil.makeBoolean(Interactive.isPrimitive(classpath, SymbolTable.getAbsyn()));
+
+    case ("isParameter", {Values.CODE(Absyn.C_TYPENAME(path)), Values.CODE(Absyn.C_TYPENAME(classpath))})
+      then ValuesUtil.makeBoolean(Interactive.isParameter(path, classpath, SymbolTable.getAbsyn()));
+
+    case ("isConstant", {Values.CODE(Absyn.C_TYPENAME(path)), Values.CODE(Absyn.C_TYPENAME(classpath))})
+      then ValuesUtil.makeBoolean(Interactive.isConstant(path, classpath, SymbolTable.getAbsyn()));
+
+    case ("isProtected", {Values.CODE(Absyn.C_TYPENAME(path)), Values.CODE(Absyn.C_TYPENAME(classpath))})
+      then ValuesUtil.makeBoolean(Interactive.isProtected(path, classpath, SymbolTable.getAbsyn()));
+
+    case ("setComponentDimensions", {Values.CODE(Absyn.C_TYPENAME(classpath)),
+        Values.CODE(Absyn.C_TYPENAME(path)), Values.CODE(Absyn.C_EXPRESSION(aexp as Absyn.Exp.ARRAY()))})
+      algorithm
+        (p, b) := Interactive.setComponentDimensions(classpath, path, aexp.arrayExp, SymbolTable.getAbsyn());
+        SymbolTable.setAbsyn(p);
+      then
+        ValuesUtil.makeBoolean(b);
+
+    case ("createModel", {Values.CODE(Absyn.C_TYPENAME(classpath))})
+      algorithm
+        p := Interactive.createModel(classpath, SymbolTable.getAbsyn());
+        SymbolTable.setAbsyn(p);
+      then
+        ValuesUtil.makeBoolean(true);
+
+    case ("newModel", {Values.CODE(Absyn.C_TYPENAME(classpath)), Values.CODE(Absyn.C_TYPENAME(path))})
+      algorithm
+        p := Interactive.newModel(classpath, path, SymbolTable.getAbsyn());
+        SymbolTable.setAbsyn(p);
+      then
+        ValuesUtil.makeBoolean(true);
+
+    case ("deleteClass", {Values.CODE(Absyn.C_TYPENAME(classpath))})
+      algorithm
+        (b, p) := Interactive.deleteClass(classpath, SymbolTable.getAbsyn());
+        SymbolTable.setAbsyn(p);
+      then
+        ValuesUtil.makeBoolean(b);
+
+    case ("addComponent", {Values.CODE(Absyn.C_TYPENAME(Absyn.IDENT(name))),
+        Values.CODE(Absyn.C_TYPENAME(path)), Values.CODE(Absyn.C_TYPENAME(classpath)),
+        Values.CODE(Absyn.C_EXPRESSION(aexp)), Values.CODE(Absyn.C_MODIFICATION(modification = mod)),
+        Values.CODE(Absyn.C_EXPRESSION(aexp2)), Values.CODE(Absyn.C_EXPRESSION(aexp3))})
+      algorithm
+        (p, b) := Interactive.addComponent(name, path, classpath, aexp, mod, aexp2, aexp3, SymbolTable.getAbsyn());
+        SymbolTable.setAbsyn(p);
+      then
+        ValuesUtil.makeBoolean(b);
  end matchcontinue;
 end cevalInteractiveFunctions4;
 

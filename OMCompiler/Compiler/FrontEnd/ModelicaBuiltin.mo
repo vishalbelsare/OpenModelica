@@ -2687,6 +2687,29 @@ external "builtin";
 annotation(preferredView="text");
 end reduceTerms;
 
+function createModel
+  input TypeName className;
+  output Boolean success;
+external "builtin"
+annotation(
+  Documentation(info="<html>
+  Creates a new empty model.
+</html>"),
+  preferredView="text");
+end createModel;
+
+function newModel
+  input TypeName className;
+  input TypeName withinPath;
+  output Boolean success;
+external "builtin"
+annotation(
+  Documentation(info="<html>
+  Creates a new empty model in the given package.
+</html>"),
+  preferredView="text");
+end newModel;
+
 function moveClass
  "Moves a class up or down depending on the given offset, where a positive
   offset moves the class down and a negative offset up. The offset is truncated
@@ -2728,6 +2751,17 @@ function copyClass
 external "builtin";
 annotation(preferredView="text");
 end copyClass;
+
+function deleteClass
+  input TypeName className;
+  output Boolean success;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Unloads a class.
+</html>"),
+  preferredView="text");
+end deleteClass;
 
 function linearize "creates a model with symbolic linearization matrices"
   input TypeName className "the class that should simulated";
@@ -3126,6 +3160,23 @@ and the annotation to set.</p>
 </html>"));
 end addClassAnnotation;
 
+function addComponent
+  input TypeName componentName;
+  input TypeName typeName;
+  input TypeName classPath;
+  input Expression binding = $Expression(());
+  input ExpressionOrModification modification = $Code(());
+  input Expression comment = $Expression(());
+  input Expression annotate = $Expression(());
+  output Boolean success;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Adds a component to the given class.
+</html>"),
+  preferredView="text");
+end addComponent;
+
 function getParameterNames
   input TypeName class_;
   output String[:] parameters;
@@ -3148,6 +3199,18 @@ annotation(
 </html>"),
   preferredView="text");
 end getParameterValue;
+
+function setParameterValue
+  input TypeName className;
+  input TypeName variableName;
+  input Expression value;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Sets the binding equation of a component.
+</html>"),
+  preferredView="text");
+end setParameterValue;
 
 function getComponentModifierNames
   input TypeName class_;
@@ -3222,6 +3285,19 @@ annotation(
 </html>"),
   preferredView="text");
 end getElementModifierNames;
+
+function getExtendsModifierNames
+  input TypeName className;
+  input TypeName extendsName;
+  input Boolean useQuotes = false;
+  output String modifiers;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Returns the names of the modifiers on an extends clause.
+</html>"),
+  preferredView="text");
+end getExtendsModifierNames;
 
 function setComponentModifierValue = setElementModifierValue;
 
@@ -3379,6 +3455,19 @@ annotation(
 </html>"),
   preferredView="text");
 end removeExtendsModifiers;
+
+function setComponentDimensions
+  input TypeName className;
+  input TypeName componentName;
+  input Expression dimensions;
+  output Boolean success;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Sets the array dimensions of a component.
+</html>"),
+  preferredView="text");
+end setComponentDimensions;
 
 function updateConnection
   input TypeName className;
@@ -3925,6 +4014,53 @@ annotation(
 </html>"),
   preferredView="text");
 end getBuiltinType;
+
+function isPrimitive
+  input TypeName className;
+  output Boolean result;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Returns true if the given class is a primitive type, otherwise false.
+</html>"),
+  preferredView="text");
+end isPrimitive;
+
+function isParameter
+  input TypeName componentName;
+  input TypeName className;
+  output Boolean result;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Returns true if the given component in the given class is a parameter, otherwise false.
+</html>"),
+  preferredView="text");
+end isParameter;
+
+function isConstant
+  input TypeName componentName;
+  input TypeName className;
+  output Boolean result;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Returns true if the given component in the given class is a constant, otherwise false.
+</html>"),
+  preferredView="text");
+end isConstant;
+
+function isProtected
+  input TypeName componentName;
+  input TypeName className;
+  output Boolean result;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Returns true if the given component in the given class is protected, otherwise false.
+</html>"),
+  preferredView="text");
+end isProtected;
 
 function setInitXmlStartValue
   input String fileName;

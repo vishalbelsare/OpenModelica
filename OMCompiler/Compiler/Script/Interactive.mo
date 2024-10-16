@@ -897,66 +897,6 @@ algorithm
   args := getApiFunctionArgs(inStatement);
 
   outResult := match(fn_name)
-    case "setParameterValue"
-      algorithm
-        {Absyn.CREF(componentRef = class_), Absyn.CREF(componentRef = crident), exp} := args;
-        (p, outResult) := setParameterValue(class_, crident, exp, p);
-        SymbolTable.setAbsyn(p);
-      then
-        outResult;
-
-    case "setComponentDimensions"
-      algorithm
-        {Absyn.CREF(componentRef = class_),
-         Absyn.CREF(componentRef = cr),
-         Absyn.ARRAY(dimensions)} := args;
-        (p, outResult) := setComponentDimensions(class_, cr, dimensions, p);
-        SymbolTable.setAbsyn(p);
-      then
-        outResult;
-
-    case "createModel"
-      algorithm
-        {Absyn.CREF(componentRef = cr)} := args;
-        p := createModel(cr, p);
-        SymbolTable.setAbsyn(p);
-      then
-        "true";
-
-    case "newModel"
-      algorithm
-        {Absyn.CREF(componentRef = Absyn.CREF_IDENT(name = name)),
-         Absyn.CREF(componentRef = cr)} := args;
-        path := AbsynUtil.crefToPath(cr);
-        p := InteractiveUtil.updateProgram(
-          Absyn.PROGRAM({
-          Absyn.CLASS(name,false,false,false,Absyn.R_MODEL(),AbsynUtil.dummyParts,{},{},AbsynUtil.dummyInfo)
-          }, Absyn.WITHIN(path)), p);
-        SymbolTable.setAbsyn(p);
-      then
-        "true";
-
-    // Not moving this yet as it could break things...
-    case "deleteClass"
-      algorithm
-        {Absyn.CREF(componentRef = cr)} := args;
-        (outResult, p) := deleteClass(cr, p);
-        SymbolTable.setAbsyn(p);
-      then
-        outResult;
-
-    case "addComponent"
-      algorithm
-        {Absyn.CREF(componentRef = Absyn.CREF_IDENT(name = name)),
-         Absyn.CREF(componentRef = tp),
-         Absyn.CREF(componentRef = model_)} := args;
-        nargs := getApiFunctionNamedArgs(inStatement);
-        p := addComponent(name, tp, model_, nargs, p);
-        SymbolTable.setAbsyn(p);
-        Print.clearBuf();
-      then
-        "true";
-
     case "updateComponent"
       algorithm
         {Absyn.CREF(componentRef = Absyn.CREF_IDENT(name = name)),
@@ -1344,30 +1284,6 @@ algorithm
       then
         getExternalFunctionSpecification(cr, p);
 
-    case "isPrimitive"
-      algorithm
-        {Absyn.CREF(componentRef = cr)} := args;
-      then
-        boolString(isPrimitive(cr, p));
-
-    case "isParameter"
-      algorithm
-        {Absyn.CREF(componentRef = cr), Absyn.CREF(componentRef = class_)} := args;
-      then
-        boolString(isParameter(cr, class_, p));
-
-    case "isProtected"
-      algorithm
-        {Absyn.CREF(componentRef = cr), Absyn.CREF(componentRef = class_)} := args;
-      then
-        boolString(isProtected(cr, class_, p));
-
-    case "isConstant"
-      algorithm
-        {Absyn.CREF(componentRef = cr), Absyn.CREF(componentRef = class_)} := args;
-      then
-        boolString(isConstant(cr, class_, p));
-
     case "getEnumerationLiterals"
       algorithm
         {Absyn.CREF(componentRef = cr)} := args;
@@ -1428,20 +1344,6 @@ algorithm
         {Absyn.CREF(componentRef = cr)} := args;
       then
         getCrefInfo(cr, p);
-
-    case "getExtendsModifierNames"
-      algorithm
-        {Absyn.CREF(componentRef = class_), Absyn.CREF(componentRef = cr)} := args;
-        nargs := getApiFunctionNamedArgs(inStatement);
-        if not Flags.isSet(Flags.NF_API_NOISE) then
-          ErrorExt.setCheckpoint("getExtendsModifierNames");
-        end if;
-        outResult := getExtendsModifierNames(class_, cr, useQuotes(nargs), p);
-        if not Flags.isSet(Flags.NF_API_NOISE) then
-          ErrorExt.rollBack("getExtendsModifierNames");
-        end if;
-      then
-        outResult;
 
     case "getExtendsModifierValue"
       algorithm
@@ -4926,6 +4828,13 @@ algorithm
   end matchcontinue;
 end isExtendsModifierFinal;
 
+public function extendsElementspecNamed
+"the name given as path, false otherwise."
+  input Absyn.ElementSpec inElementSpec;
+  input Absyn.Path inPath;
+  output Boolean res = AbsynUtil.pathEqual(inPath, AbsynUtil.elementSpecToPath(inElementSpec));
+end extendsElementspecNamed;
+
 public function isModifierfinal
 " Helper function to isExtendsModifierFinal."
   input list<Absyn.ElementArg> inAbsynElementArgLst;
@@ -4959,7 +4868,7 @@ algorithm
   end match;
 end isModifierfinal;
 
-protected function makeExtendsFullyQualified
+function makeExtendsFullyQualified
 " Makes an EXTENDS ElementSpec having a
    fully qualified extends path."
   input Absyn.ElementSpec inElementSpec;
@@ -4981,106 +4890,6 @@ algorithm
         Absyn.EXTENDS(path_1,earg,annOpt);
   end match;
 end makeExtendsFullyQualified;
-
-protected function getExtendsModifierNames
-" Return the modifier names of a
-   modification on an extends clause.
-   For instance,
-     model test extends A(p1=3,p2(z=3));end test;
-     getExtendsModifierNames(test,A) => {p1,p2.z}
-   inputs:  (Absyn.ComponentRef, /* class */
-               Absyn.ComponentRef, /* inherited class */
-               Absyn.Program)
-   outputs: (string)"
-  input Absyn.ComponentRef inComponentRef1;
-  input Absyn.ComponentRef inComponentRef2;
-  input Boolean inBoolean;
-  input Absyn.Program inProgram3;
-  output String outString;
-algorithm
-  outString:=
-  matchcontinue (inComponentRef1,inComponentRef2,inBoolean,inProgram3)
-    local
-      Absyn.Path p_class,name,extpath;
-      Absyn.Class cdef;
-      list<Absyn.ElementSpec> exts,exts_1;
-      GraphicEnvCache env;
-      list<Absyn.ElementArg> extmod;
-      list<String> res,res1;
-      String res_1,res_2;
-      Boolean b;
-      Absyn.ComponentRef class_,inherit_name;
-      Absyn.Program p;
-    case (class_,inherit_name,b,p)
-      equation
-        p_class = AbsynUtil.crefToPath(class_);
-        name = AbsynUtil.crefToPath(inherit_name);
-        cdef = InteractiveUtil.getPathedClassInProgram(p_class, p);
-        exts = InteractiveUtil.getExtendsElementspecInClass(cdef);
-        if hasModifiers(exts) then
-          env = getClassEnv(p, p_class);
-          exts_1 = List.map1(exts, makeExtendsFullyQualified, env);
-          {Absyn.EXTENDS(_,extmod,_)} = List.select1(exts_1, extendsElementspecNamed, name);
-          res = getModificationNames(extmod);
-          res1 = if b then insertQuotesToList(res) else res;
-          res_1 = stringDelimitList(res1, ", ");
-        else
-          res_1 = "";
-        end if;
-        res_2 = stringAppendList({"{",res_1,"}"});
-      then
-        res_2;
-    else "Error";
-  end matchcontinue;
-end getExtendsModifierNames;
-
-function hasModifiers
-  input list<Absyn.ElementSpec> exts;
-  output Boolean b = false;
-protected
-   Absyn.ElementSpec ext;
-algorithm
-  for e in exts loop
-    b := match e
-      case ext as Absyn.EXTENDS() then not listEmpty(ext.elementArg);
-      else false;
-    end match;
-    if b then
-      break;
-    end if;
-  end for;
-end hasModifiers;
-
-protected function extendsElementspecNamed
-"the name given as path, false otherwise."
-  input Absyn.ElementSpec inElementSpec;
-  input Absyn.Path inPath;
-  output Boolean outBoolean;
-algorithm
-  outBoolean:=
-  match (inElementSpec,inPath)
-    local
-      Boolean res;
-      Absyn.Path extpath,path;
-    case (Absyn.EXTENDS(path = extpath),path)
-      equation
-        res = AbsynUtil.pathEqual(path, extpath);
-      then
-        res;
-  end match;
-end extendsElementspecNamed;
-
-protected function extendsName
-"Return the class name of an EXTENDS element spec."
-  input Absyn.ElementSpec inElementSpec;
-  output Absyn.Path outPath;
-algorithm
-  outPath:=
-  match (inElementSpec)
-    local Absyn.Path path;
-    case (Absyn.EXTENDS(path = path)) then path;
-  end match;
-end extendsName;
 
 public function removeComponentModifiers
   "Removes all the modifiers of a component."
@@ -5342,257 +5151,6 @@ algorithm
     bindingStr := "";
   end try;
 end getComponentBinding;
-
-protected function setParameterValue
-" Sets the parameter value of a class and returns the updated program.
-   inputs:  (Absyn.ComponentRef, /* class */
-               Absyn.ComponentRef, /* ident */
-               Absyn.Exp,          /* exp */
-               Absyn.Program)
-   outputs: (Absyn.Program,string)"
-  input Absyn.ComponentRef inComponentRefClass;
-  input Absyn.ComponentRef inComponentRefComponentName;
-  input Absyn.Exp inBindingExp;
-  input Absyn.Program inFullProgram;
-  output Absyn.Program outProgram;
-  output String outString;
-algorithm
-  (outProgram,outString) := matchcontinue (inComponentRefClass,inComponentRefComponentName,inBindingExp,inFullProgram)
-    local
-      Absyn.Path p_class;
-      String varname, str;
-      Absyn.Within within_;
-      Absyn.Class cdef,cdef_1;
-      Absyn.Program newp,p;
-      Absyn.ComponentRef class_,name;
-      Absyn.Exp exp;
-      Boolean b;
-
-    case (class_,name,exp,p as Absyn.PROGRAM())
-      equation
-        p_class = AbsynUtil.crefToPath(class_);
-        Absyn.IDENT(varname) = AbsynUtil.crefToPath(name);
-        within_ = InteractiveUtil.buildWithin(p_class);
-        cdef = InteractiveUtil.getPathedClassInProgram(p_class, p);
-        (cdef_1, b) = setVariableBindingInClass(cdef, varname, exp);
-        newp = InteractiveUtil.updateProgram(Absyn.PROGRAM({cdef_1},within_), p);
-        str = if b then "Ok" else ("Error: component with name: " + varname + " in class: " + AbsynUtil.pathString(p_class) + " not found.");
-      then
-        (newp,str);
-
-    case (class_,name,_,p as Absyn.PROGRAM())
-      equation
-        p_class = AbsynUtil.crefToPath(class_);
-        Absyn.IDENT(_) = AbsynUtil.crefToPath(name);
-        failure(_ = InteractiveUtil.getPathedClassInProgram(p_class, p));
-        str = "Error: class: " + AbsynUtil.pathString(p_class) + " not found.";
-      then
-        (p,str);
-
-    else (inFullProgram,"Error");
-  end matchcontinue;
-end setParameterValue;
-
-protected function setVariableBindingInClass
-" Takes a class and an identifier and value an
-   sets the variable binding to the passed expression."
-  input Absyn.Class inClass;
-  input Absyn.Ident inIdent;
-  input Absyn.Exp inExp;
-  output Absyn.Class outClass;
-  output Boolean outChangeMade;
-algorithm
-  (outClass, outChangeMade) := match (inClass,inIdent,inExp)
-    local
-      list<Absyn.ClassPart> parts_1,parts;
-      String id,id2,bcname;
-      Boolean p,f,e;
-      Absyn.Restriction r;
-      Option<String> cmt;
-      SourceInfo file_info;
-      Absyn.Exp exp;
-      list<Absyn.ElementArg> modif;
-      list<String> typeVars;
-      list<Absyn.NamedArg> classAttrs;
-      Boolean b;
-      list<Absyn.Annotation> ann;
-
-    // a class with parts
-    case (outClass as Absyn.CLASS(name = id,partialPrefix = p,finalPrefix = f,encapsulatedPrefix = e,restriction = r,
-                      body = Absyn.PARTS(typeVars = typeVars,classAttrs = classAttrs,classParts = parts,ann = ann,comment = cmt),info = file_info),
-          id2,exp)
-      equation
-        (parts_1, b) = setVariableBindingInClassparts(parts, id2, exp);
-        outClass.body = Absyn.PARTS(typeVars,classAttrs,parts_1,ann,cmt);
-      then
-        (outClass, b);
-
-    // adrpo: handle also model extends M end M;
-    case (outClass as Absyn.CLASS(name = id,partialPrefix = p,finalPrefix = f,encapsulatedPrefix = e,restriction = r,
-                      body = Absyn.CLASS_EXTENDS(baseClassName=bcname,modifications=modif,parts = parts,ann = ann,comment = cmt),info = file_info),
-          id2,exp)
-      equation
-        (parts_1,b) = setVariableBindingInClassparts(parts, id2, exp);
-        outClass.body = Absyn.CLASS_EXTENDS(bcname,modif,cmt,parts_1,ann);
-      then (outClass,b);
-  end match;
-end setVariableBindingInClass;
-
-protected function setVariableBindingInClassparts
-" Sets a binding of a variable in a ClassPart
-   list, named by the passed argument."
-  input list<Absyn.ClassPart> inAbsynClassPartLst;
-  input Absyn.Ident inIdent;
-  input Absyn.Exp inExp;
-  output list<Absyn.ClassPart> outAbsynClassPartLst;
-  output Boolean outChangeMade;
-algorithm
-  (outAbsynClassPartLst, outChangeMade) := matchcontinue (inAbsynClassPartLst,inIdent,inExp)
-    local
-      list<Absyn.ClassPart> res,rest;
-      list<Absyn.ElementItem> elts_1,elts;
-      String id;
-      Absyn.Exp exp;
-      Absyn.ClassPart elt;
-      Boolean b1, b2, b;
-
-    case ({},_,_) then ({}, false);
-
-    case ((Absyn.PUBLIC(contents = elts) :: rest),id,exp)
-      equation
-        (res, b1) = setVariableBindingInClassparts(rest, id, exp);
-        (elts_1, b2) = setVariableBindingInElementitems(elts, id, exp);
-        b = boolOr(b1, b2);
-      then
-        (Absyn.PUBLIC(elts_1) :: res, b);
-
-    case ((Absyn.PROTECTED(contents = elts) :: rest),id,exp)
-      equation
-        (res, b1) = setVariableBindingInClassparts(rest, id, exp);
-        (elts_1, b2) = setVariableBindingInElementitems(elts, id, exp);
-        b = boolOr(b1, b2);
-      then
-        (Absyn.PROTECTED(elts_1) :: res, b);
-
-    case ((elt :: rest),id,exp)
-      equation
-        (res, b) = setVariableBindingInClassparts(rest, id, exp);
-      then
-        (elt :: res, b);
-  end matchcontinue;
-end setVariableBindingInClassparts;
-
-protected function setVariableBindingInElementitems
-" Sets a variable binding in a list of ElementItems"
-  input list<Absyn.ElementItem> inAbsynElementItemLst;
-  input Absyn.Ident inIdent;
-  input Absyn.Exp inExp;
-  output list<Absyn.ElementItem> outAbsynElementItemLst;
-  output Boolean outChangeMade;
-algorithm
-  (outAbsynElementItemLst, outChangeMade) :=
-  matchcontinue (inAbsynElementItemLst,inIdent,inExp)
-    local
-      list<Absyn.ElementItem> res,rest;
-      Absyn.Element elt_1,elt;
-      String id;
-      Absyn.Exp exp;
-      Absyn.ElementItem elitem;
-      Boolean b1, b2, b;
-
-    case ({},_,_) then ({}, false);
-
-    case ((Absyn.ELEMENTITEM(element = elt) :: rest),id,exp)
-      equation
-        (res, b1) = setVariableBindingInElementitems(rest, id, exp);
-        (elt_1, b2) = setVariableBindingInElement(elt, id, exp);
-        b = boolOr(b1, b2);
-      then
-        (Absyn.ELEMENTITEM(elt_1) :: res, b);
-
-    case ((elitem :: rest),id,exp)
-      equation
-        (res, b) = setVariableBindingInElementitems(rest, id, exp);
-      then
-        (elitem :: res, b);
-  end matchcontinue;
-end setVariableBindingInElementitems;
-
-protected function setVariableBindingInElement
-" Sets a variable binding in an Element."
-  input Absyn.Element inElement;
-  input Absyn.Ident inIdent;
-  input Absyn.Exp inExp;
-  output Absyn.Element outElement;
-  output Boolean outChangeMade;
-algorithm
-  (outElement, outChangeMade) :=
-  matchcontinue (inElement,inIdent,inExp)
-    local
-      list<Absyn.ComponentItem> compitems_1,compitems;
-      Boolean f,b;
-      Option<Absyn.RedeclareKeywords> r;
-      Absyn.InnerOuter i;
-      String id;
-      Absyn.ElementAttributes attr;
-      Absyn.TypeSpec tp;
-      SourceInfo info;
-      Option<Absyn.ConstrainClass> constr;
-      Absyn.Exp exp;
-      Absyn.Element elt;
-
-    case (Absyn.ELEMENT(finalPrefix = f,redeclareKeywords = r,innerOuter = i,specification = Absyn.COMPONENTS(attributes = attr,typeSpec = tp,components = compitems),info = info,constrainClass = constr),id,exp)
-      equation
-        (compitems_1, b) = setVariableBindingInCompitems(compitems, id, exp);
-      then
-        (Absyn.ELEMENT(f,r,i,Absyn.COMPONENTS(attr,tp,compitems_1),info,constr), b);
-
-    else (inElement, false);
-  end matchcontinue;
-end setVariableBindingInElement;
-
-protected function setVariableBindingInCompitems
-" Sets a variable binding in a ComponentItem list
-   and returns true if it found it"
-  input list<Absyn.ComponentItem> inAbsynComponentItemLst;
-  input Absyn.Ident inIdent;
-  input Absyn.Exp inExp;
-  output list<Absyn.ComponentItem> outAbsynComponentItemLst;
-  output Boolean outChangeMade;
-algorithm
-  (outAbsynComponentItemLst,outChangeMade) := match (inAbsynComponentItemLst,inIdent,inExp)
-    local
-      String id,id2;
-      list<Absyn.Subscript> dim;
-      list<Absyn.ElementArg> arg;
-      Option<Absyn.Exp> cond;
-      Option<Absyn.Comment> cmt;
-      list<Absyn.ComponentItem> rest,res;
-      Absyn.Exp exp;
-      Absyn.ComponentItem item;
-      Boolean b;
-
-    case ({},_,_) then ({}, false);
-
-    case ((Absyn.COMPONENTITEM(component = Absyn.COMPONENT(name = id,arrayDim = dim,modification = SOME(Absyn.CLASSMOD(arg,_))),condition = cond,comment = cmt) :: rest),id2,exp)
-      guard
-        stringEq(id, id2)
-      then
-        ((Absyn.COMPONENTITEM(Absyn.COMPONENT(id,dim,SOME(Absyn.CLASSMOD(arg,Absyn.EQMOD(exp,AbsynUtil.dummyInfo)))),cond,cmt) :: rest), true);
-
-    case ((Absyn.COMPONENTITEM(component = Absyn.COMPONENT(name = id,arrayDim = dim,modification = NONE()),condition = cond,comment = cmt) :: rest),id2,exp)
-      guard
-        stringEq(id, id2)
-      then
-        ((Absyn.COMPONENTITEM(Absyn.COMPONENT(id,dim,SOME(Absyn.CLASSMOD({},Absyn.EQMOD(exp,AbsynUtil.dummyInfo)))),cond,cmt) :: rest), true);
-
-    case (item :: rest,id,exp)
-      equation
-        (res, b) = setVariableBindingInCompitems(rest, id, exp);
-      then
-        (item :: res, b);
-  end match;
-end setVariableBindingInCompitems;
 
 protected function getComponentitemName
 " Returns the name of a ComponentItem"
@@ -6047,35 +5605,29 @@ public function isPrimitive
 "Thisfunction takes a component reference and a program.
   It returns the true if the refrenced type is a primitive
   type, otherwise it returns false."
-  input Absyn.ComponentRef inComponentRef;
+  input Absyn.Path className;
   input Absyn.Program inProgram;
   output Boolean outBoolean;
 algorithm
-  outBoolean:=
-  match (inComponentRef,inProgram)
+  outBoolean := match className
     local
-      Absyn.Path path;
       Absyn.Class class_;
-      Boolean res;
-      Absyn.ComponentRef cr;
-      Absyn.Program p;
-    case (Absyn.CREF_IDENT(name = "Real"),_) then true;  /* Instead of elaborating and lookup these in env, we optimize a bit and just return true for these */
-    case (Absyn.CREF_IDENT(name = "Integer"),_) then true;
-    case (Absyn.CREF_IDENT(name = "String"),_) then true;
-    case (Absyn.CREF_IDENT(name = "Boolean"),_) then true;
-    case (cr,p)
-      equation
-        path = AbsynUtil.crefToPath(cr);
-        class_ = InteractiveUtil.getPathedClassInProgram(path, p);
-        res = isPrimitiveClass(class_, p);
+    /* Instead of elaborating and lookup these in env, we optimize a bit and just return true for these */
+    case Absyn.IDENT(name = "Real") then true;
+    case Absyn.IDENT(name = "Integer") then true;
+    case Absyn.IDENT(name = "String") then true;
+    case Absyn.IDENT(name = "Boolean") then true;
+    case _
+      algorithm
+        class_ := InteractiveUtil.getPathedClassInProgram(className, inProgram);
       then
-        res;
+        isPrimitiveClass(class_, inProgram);
     else false;
   end match;
 end isPrimitive;
 
-protected function createModel
-  input Absyn.ComponentRef inComponentRef;
+public function createModel
+  input Absyn.Path className;
   input Absyn.Program inProgram;
   output Absyn.Program outProgram;
 protected
@@ -6083,12 +5635,11 @@ protected
   Absyn.Within w;
   Absyn.Path wp;
 algorithm
-  if AbsynUtil.crefIsIdent(inComponentRef) then
-    name := AbsynUtil.crefFirstIdent(inComponentRef);
+  if AbsynUtil.pathIsIdent(className) then
+    name := AbsynUtil.pathFirstIdent(className);
     w := Absyn.TOP();
   else
-    wp := AbsynUtil.crefToPath(inComponentRef);
-    (wp, Absyn.IDENT(name)) := AbsynUtil.splitQualAndIdentPath(wp);
+    (wp, Absyn.IDENT(name)) := AbsynUtil.splitQualAndIdentPath(className);
     w := Absyn.WITHIN(wp);
   end if;
 
@@ -6097,53 +5648,56 @@ algorithm
         {}, {}, AbsynUtil.dummyInfo)}, w), inProgram);
 end createModel;
 
-protected function deleteClass
-" This function takes a component reference and a program.
-   It deletes the class specified by the component reference from the
-   given program."
-  input Absyn.ComponentRef inComponentRef;
-  input Absyn.Program inProgram;
-  output String outString;
-  output Absyn.Program outProgram;
+public function newModel
+  input Absyn.Path className;
+  input Absyn.Path withinPath;
+  input output Absyn.Program program;
 algorithm
-  (outString,outProgram) := matchcontinue (inComponentRef,inProgram)
-    local
-      Absyn.Path cpath,parentcpath,parentparentcpath;
-      Absyn.Class cdef,parentcdef,parentcdef_1;
-      Absyn.Program newp,p;
-      Absyn.ComponentRef class_;
-      list<Absyn.Class> clist,clist_1;
-      Absyn.Within w;
+  program := createModel(AbsynUtil.joinPaths(withinPath, className), program);
+end newModel;
 
-    case (class_,(p as Absyn.PROGRAM()))
+public function deleteClass
+  "Deletes the given class from the program."
+  input Absyn.Path classPath;
+  input Absyn.Program inProgram;
+  output Boolean success;
+  output Absyn.Program outProgram = inProgram;
+algorithm
+  (success, outProgram) := matchcontinue inProgram
+    local
+      Absyn.Path parentcpath,parentparentcpath;
+      Absyn.Class cdef,parentcdef,parentcdef_1;
+
+    case _
       equation
-        cpath = AbsynUtil.crefToPath(class_) "Class inside another class, inside another class" ;
-        parentcpath = AbsynUtil.stripLast(cpath);
+        //Class inside another class, inside another class
+        parentcpath = AbsynUtil.stripLast(classPath);
         parentparentcpath = AbsynUtil.stripLast(parentcpath);
-        cdef = InteractiveUtil.getPathedClassInProgram(cpath, p);
-        parentcdef = InteractiveUtil.getPathedClassInProgram(parentcpath, p);
+        cdef = InteractiveUtil.getPathedClassInProgram(classPath, inProgram);
+        parentcdef = InteractiveUtil.getPathedClassInProgram(parentcpath, inProgram);
         parentcdef_1 = InteractiveUtil.removeInnerClass(cdef, parentcdef);
-        newp = InteractiveUtil.updateProgram(Absyn.PROGRAM({parentcdef_1},Absyn.WITHIN(parentparentcpath)), p);
+        outProgram = InteractiveUtil.updateProgram(Absyn.PROGRAM({parentcdef_1},Absyn.WITHIN(parentparentcpath)), inProgram);
       then
-        ("true",newp);
-    case (class_,(p as Absyn.PROGRAM()))
+        (true, outProgram);
+    case _
       equation
-        cpath = AbsynUtil.crefToPath(class_) "Class inside other class" ;
-        parentcpath = AbsynUtil.stripLast(cpath);
-        cdef = InteractiveUtil.getPathedClassInProgram(cpath, p);
-        parentcdef = InteractiveUtil.getPathedClassInProgram(parentcpath, p);
+        // Class inside other class
+        parentcpath = AbsynUtil.stripLast(classPath);
+        cdef = InteractiveUtil.getPathedClassInProgram(classPath, inProgram);
+        parentcdef = InteractiveUtil.getPathedClassInProgram(parentcpath, inProgram);
         parentcdef_1 = InteractiveUtil.removeInnerClass(cdef, parentcdef);
-        newp = InteractiveUtil.updateProgram(Absyn.PROGRAM({parentcdef_1},Absyn.TOP()), p);
+        outProgram = InteractiveUtil.updateProgram(Absyn.PROGRAM({parentcdef_1},Absyn.TOP()), inProgram);
       then
-        ("true",newp);
-    case (class_,(p as Absyn.PROGRAM()))
+        (true, outProgram);
+    case _
       equation
-        cpath = AbsynUtil.crefToPath(class_) "Top level class" ;
-        cdef = InteractiveUtil.getPathedClassInProgram(cpath, p);
-        p.classes = deleteClassFromList(cdef, p.classes);
+        // Top level class
+        cdef = InteractiveUtil.getPathedClassInProgram(classPath, inProgram);
+        outProgram.classes = deleteClassFromList(cdef, inProgram.classes);
       then
-        ("true",p);
-    else ("false",inProgram);
+        (true, outProgram);
+
+    else (false,inProgram);
   end matchcontinue;
 end deleteClass;
 
@@ -6592,11 +6146,11 @@ algorithm
   end try;
 end isRedeclare;
 
-protected function isParameter
+public function isParameter
   "This function takes a class and a component reference and a program
    and returns true if the component referenced is a parameter."
-  input Absyn.ComponentRef componentName;
-  input Absyn.ComponentRef className;
+  input Absyn.Path componentName;
+  input Absyn.Path className;
   input Absyn.Program program;
   output Boolean res;
 protected
@@ -6604,7 +6158,7 @@ protected
   Absyn.Element elem;
 algorithm
   try
-    path := AbsynUtil.joinPaths(AbsynUtil.crefToPath(className), AbsynUtil.crefToPath(componentName));
+    path := AbsynUtil.joinPaths(className, componentName);
     Absyn.ELEMENT(specification = Absyn.COMPONENTS(attributes = Absyn.ATTR(variability = Absyn.PARAM()))) :=
       InteractiveUtil.getPathedElementInProgram(path, program);
     res := true;
@@ -6613,11 +6167,11 @@ algorithm
   end try;
 end isParameter;
 
-protected function isConstant
+public function isConstant
   "This function takes a class and a component reference and a program
    and returns true if the component referenced is a constant."
-  input Absyn.ComponentRef componentName;
-  input Absyn.ComponentRef className;
+  input Absyn.Path componentName;
+  input Absyn.Path className;
   input Absyn.Program program;
   output Boolean res;
 protected
@@ -6625,7 +6179,7 @@ protected
   Absyn.Element elem;
 algorithm
   try
-    path := AbsynUtil.joinPaths(AbsynUtil.crefToPath(className), AbsynUtil.crefToPath(componentName));
+    path := AbsynUtil.joinPaths(className, componentName);
     Absyn.ELEMENT(specification = Absyn.COMPONENTS(attributes = Absyn.ATTR(variability = Absyn.CONST()))) :=
       InteractiveUtil.getPathedElementInProgram(path, program);
     res := true;
@@ -6634,23 +6188,21 @@ algorithm
   end try;
 end isConstant;
 
-protected function isProtected
+public function isProtected
   "This function takes a class and a component reference and a program
    and returns true if the component referenced is in a protected section."
-  input Absyn.ComponentRef componentName;
-  input Absyn.ComponentRef className;
+  input Absyn.Path componentName;
+  input Absyn.Path className;
   input Absyn.Program program;
   output Boolean res;
 protected
-  Absyn.Path path;
   list<Absyn.ClassPart> parts;
   list<Absyn.ElementItem> items;
 algorithm
   try
-    path := AbsynUtil.crefToPath(className);
-    parts := AbsynUtil.getClassPartsInClass(InteractiveUtil.getPathedClassInProgram(path, program));
+    parts := AbsynUtil.getClassPartsInClass(InteractiveUtil.getPathedClassInProgram(className, program));
     items := InteractiveUtil.getProtectedList(parts);
-    getComponentsContainsName(componentName, items);
+    getComponentsContainsName(AbsynUtil.pathToCref(componentName), items);
     res := true;
   else
     res := false;
@@ -6928,6 +6480,7 @@ algorithm
         res = isPrimitiveClass(cdef, p);
       then
         res;
+    else false;
   end match;
 end isPrimitiveClass;
 
@@ -7330,71 +6883,54 @@ algorithm
   end match;
 end deleteOrUpdateComponentFromElementitems;
 
-public function addComponent " This function takes:
-   arg1 - string giving the instancename,
-   arg2 - `ComponentRef\' giving the component type
-   arg3 - ComponentRef giving the model to instantiate the component within,
-   arg4 - `NamedArg\' list of annotations
-   arg5 - a Program.
-   The result is an updated program with the component and its annotations
-   inserted, and a string \"OK\" for success. If the insertion fails, a
-   suitable error string is given along with the input Program.
-"
-  input String inString1;
-  input Absyn.ComponentRef inComponentRef2;
-  input Absyn.ComponentRef inComponentRef3;
-  input list<Absyn.NamedArg> inAbsynNamedArgLst4;
-  input Absyn.Program inProgram5;
-  output Absyn.Program outProgram;
-  output String outString;
+public function addComponent
+  "Adds a component to the program."
+  input String componentName;
+  input Absyn.Path typeName;
+  input Absyn.Path classPath;
+  input Absyn.Exp bindingExp;
+  input Absyn.Modification modifier;
+  input Absyn.Exp commentExp;
+  input Absyn.Exp annotationExp;
+  input output Absyn.Program program;
+  output Boolean success = true;
+protected
+  String name, filename;
+  Absyn.Class cdef;
+  Option<Absyn.Comment> annotation_;
+  Option<Absyn.Modification> modification;
+  Absyn.Within w;
+  Absyn.InnerOuter io;
+  Option<Absyn.RedeclareKeywords> redecl;
+  Absyn.ElementAttributes attr;
+  SourceInfo info;
 algorithm
-  (outProgram,outString):=
-  matchcontinue (inString1,inComponentRef2,inComponentRef3,inAbsynNamedArgLst4,inProgram5)
-    local
-      Absyn.Path modelpath,modelwithin,tppath;
-      String name, filename;
-      Absyn.ComponentRef tp,model_;
-      list<Absyn.NamedArg> nargs;
-      Absyn.Program p,newp;
-      Absyn.Class cdef,newcdef;
-      Option<Absyn.Comment> annotation_;
-      Option<Absyn.Modification> modification;
-      Absyn.Within w;
-      Absyn.InnerOuter io;
-      Option<Absyn.RedeclareKeywords> redecl;
-      Absyn.ElementAttributes attr;
+  try
+    w := match classPath
+      case Absyn.IDENT() then Absyn.TOP();
+      else Absyn.WITHIN(AbsynUtil.stripLast(classPath));
+    end match;
 
-    // class cannot be found
-    case (_,_,model_,_,p)
-      equation
-        modelpath = AbsynUtil.crefToPath(model_);
-        failure(_ = InteractiveUtil.getPathedClassInProgram(modelpath, p));
-      then
-        (p,"false\n");
+    (cdef as Absyn.CLASS(info=SOURCEINFO(fileName=filename))) :=
+      InteractiveUtil.getPathedClassInProgram(classPath, program);
+    info := SOURCEINFO(filename, false, 0, 0, 0, 0, 0.0);
 
-    // adding component to model that resides inside package
-    case (name,tp,model_,nargs,(p as Absyn.PROGRAM()))
-      equation
-        modelpath = AbsynUtil.crefToPath(model_);
-        w = match modelpath case Absyn.IDENT() then Absyn.TOP(); else Absyn.WITHIN(AbsynUtil.stripLast(modelpath)); end match;
-        (cdef as Absyn.CLASS(info=SOURCEINFO(fileName=filename))) = InteractiveUtil.getPathedClassInProgram(modelpath, p);
-        tppath = AbsynUtil.crefToPath(tp);
-        annotation_ = annotationListToAbsynComment(nargs,NONE());
-        modification = modificationToAbsyn(nargs,NONE());
-        (io,redecl,attr) = getDefaultPrefixes(p,tppath);
-        newcdef = addToPublic(cdef,
-          Absyn.ELEMENTITEM(
-          Absyn.ELEMENT(false,redecl,io,
-          Absyn.COMPONENTS(attr,Absyn.TPATH(AbsynUtil.pathStripSamePrefix(tppath,modelpath),NONE()),{
-          Absyn.COMPONENTITEM(Absyn.COMPONENT(name,{},modification),NONE(),annotation_)}),
-          SOURCEINFO(filename,false,0,0,0,0,0.0),NONE())));
-        newp = InteractiveUtil.updateProgram(Absyn.PROGRAM({newcdef},w), p);
-      then
-        (newp,"Ok\n");
+    annotation_ := InteractiveUtil.makeCommentFromArgs(commentExp, annotationExp);
+    modification := InteractiveUtil.makeModifierFromArgs(bindingExp, modifier, info);
+    (io, redecl, attr) := getDefaultPrefixes(program, typeName);
 
-    else (inProgram5,"Error");
-
-  end matchcontinue;
+    cdef := addToPublic(cdef,
+      Absyn.ELEMENTITEM(
+        Absyn.ELEMENT(false, redecl, io,
+          Absyn.COMPONENTS(attr, Absyn.TPATH(AbsynUtil.pathStripSamePrefix(typeName, classPath), NONE()),
+            {Absyn.COMPONENTITEM(Absyn.COMPONENT(componentName, {}, modification), NONE(), annotation_)}),
+          info, NONE())
+      )
+    );
+    program := InteractiveUtil.updateProgram(Absyn.PROGRAM({cdef}, w), program);
+  else
+    success := false;
+  end try;
 end addComponent;
 
 protected function getDefaultPrefixes "Retrieves default prefixes by looking at the defaultComponentPrefixes annotation"
@@ -8283,7 +7819,7 @@ algorithm
   end match;
 end useQuotes;
 
-protected function insertQuotesToList
+public function insertQuotesToList
   input list<String> inStringList;
   output list<String> outStringList;
 algorithm
@@ -14616,36 +14152,35 @@ algorithm
   end try;
 end getClassEnvNoElaboration;
 
-protected function setComponentDimensions
+public function setComponentDimensions
   "Sets a component dimensions."
-  input Absyn.ComponentRef inClass;
-  input Absyn.ComponentRef inComponentName;
+  input Absyn.Path inClass;
+  input Absyn.Path inComponentName;
   input list<Absyn.Exp> inDimensions;
   input Absyn.Program inProgram;
   output Absyn.Program outProgram;
-  output String outResult;
+  output Boolean outResult;
 protected
   Absyn.Path p_class;
   Absyn.Within within_;
   Absyn.Class cls;
 algorithm
   try
-    p_class := AbsynUtil.crefToPath(inClass);
-    within_ := InteractiveUtil.buildWithin(p_class);
-    cls := InteractiveUtil.getPathedClassInProgram(p_class, inProgram);
+    within_ := InteractiveUtil.buildWithin(inClass);
+    cls := InteractiveUtil.getPathedClassInProgram(inClass, inProgram);
     cls := setComponentDimensionsInClass(cls, inComponentName, inDimensions);
     outProgram := InteractiveUtil.updateProgram(Absyn.PROGRAM({cls}, within_), inProgram);
-    outResult := "Ok";
+    outResult := true;
   else
     outProgram := inProgram;
-    outResult := "Error";
+    outResult := false;
   end try;
 end setComponentDimensions;
 
 protected function setComponentDimensionsInClass
 " Sets the dimensions on a component in a class."
   input Absyn.Class inClass;
-  input Absyn.ComponentRef inComponentName;
+  input Absyn.Path inComponentName;
   input list<Absyn.Exp> inDimensions;
   output Absyn.Class outClass = inClass;
 algorithm
@@ -14658,7 +14193,7 @@ protected function setComponentDimensionsInCompitems
  Sets the dimensions in a ComponentItem."
   input list<Absyn.ComponentItem> inComponents;
   input Boolean inFound;
-  input Absyn.ComponentRef inComponentName;
+  input Absyn.Path inComponentName;
   input list<Absyn.Exp> inDimensions;
   output list<Absyn.ComponentItem> outComponents = {};
   output Boolean outFound;
@@ -14671,7 +14206,7 @@ protected
   Absyn.EqMod eqmod_old, eqmod_new;
   String comp_id;
 algorithm
-  comp_id := AbsynUtil.crefFirstIdent(inComponentName);
+  comp_id := AbsynUtil.pathFirstIdent(inComponentName);
 
   // Try to find the component we're looking for.
   while not listEmpty(rest_items) loop
