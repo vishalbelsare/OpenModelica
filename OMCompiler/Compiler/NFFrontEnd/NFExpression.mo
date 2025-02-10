@@ -39,6 +39,7 @@ protected
   import System;
   import Flags;
 
+  import NFBackendExtension.{BackendInfo, VariableKind};
   import Builtin = NFBuiltin;
   import BuiltinCall = NFBuiltinCall;
   import Ceval = NFCeval;
@@ -181,6 +182,7 @@ public
     Expression exp1;
     Operator operator;
     Expression exp2;
+    Integer index  "index for event codegen"; // TODO: remove me :)
   end RELATION;
 
   record MULTARY
@@ -623,7 +625,7 @@ public
 
       case RELATION()
         algorithm
-          RELATION(exp1 = e1, operator = op, exp2 = e2) := exp2;
+          RELATION(exp1 = e1, operator = op, exp2 = e2, index = i) := exp2;
           comp := Operator.compare(exp1.operator, op);
           if comp == 0 then
             comp := compare(exp1.exp1, e1);
@@ -849,7 +851,7 @@ public
       local
         Operator o;
       case ENUM_LITERAL()         algorithm exp.ty := func(exp.ty); then exp;
-      case CREF()                 algorithm exp.ty := func(exp.ty); then exp;
+      case CREF()                 algorithm exp.ty := func(exp.ty); exp.cref := ComponentRef.applyToType(exp.cref, func); then exp;
       case TYPENAME()             algorithm exp.ty := func(exp.ty); then exp;
       case ARRAY()                algorithm exp.ty := func(exp.ty); then exp;
       case RANGE()                algorithm exp.ty := func(exp.ty); then exp;
@@ -1177,21 +1179,6 @@ public
     output Integer start;
     output Integer step;
     output Integer stop;
-  protected
-    function getInteger
-      input Expression exp;
-      output Integer i;
-    protected
-      Expression e;
-    algorithm
-      e := Expression.map(exp, Expression.replaceResizableParameter);
-      i := match SimplifyExp.simplify(e)
-        case INTEGER(i) then i;
-        else algorithm
-          Error.assertion(false, getInstanceName() + " cannot be parsed to an integer: " + toString(exp), sourceInfo());
-        then fail();
-      end match;
-    end getInteger;
   algorithm
     (start, step, stop) := match range
       local
@@ -1217,6 +1204,21 @@ public
     end match;
   end getIntegerRange;
 
+  function getInteger
+    input Expression exp;
+    output Integer i;
+  protected
+    Expression e;
+  algorithm
+    e := Expression.map(exp, Expression.replaceResizableParameter);
+    i := match SimplifyExp.simplify(e)
+      case INTEGER(i) then i;
+      else algorithm
+        Error.assertion(false, getInstanceName() + " cannot be parsed to an integer: " + toString(exp), sourceInfo());
+      then fail();
+    end match;
+  end getInteger;
+
   function makeTuple
     input list<Expression> expl;
     output Expression tupleExp;
@@ -1233,7 +1235,8 @@ public
 
   function rangeSize
     input Expression range  "has to be RANGE()!";
-    output Integer size = Dimension.size(Type.nthDimension(typeOf(range), 1));
+    input Boolean resize = false;
+    output Integer size = Dimension.size(Type.nthDimension(typeOf(range), 1), resize);
   end rangeSize;
 
   function applySubscripts
@@ -1317,7 +1320,7 @@ public
     Integer index;
     array<Expression> expl;
   algorithm
-    sub := Subscript.expandSlice(subscript);
+    sub := Subscript.expandSlice(subscript, false);
 
     outExp := match sub
       case Subscript.INDEX() then applyIndexSubscriptTypename(ty, sub);
@@ -1381,7 +1384,7 @@ public
       return;
     end if;
 
-    sub := Subscript.expandSlice(subscript);
+    sub := Subscript.expandSlice(subscript, false);
 
     outExp := match sub
       case Subscript.INDEX() then applyIndexSubscriptArray(exp, sub, restSubscripts);
@@ -1485,7 +1488,7 @@ public
     Type ty;
     array<Expression> expl;
   algorithm
-    sub := Subscript.expandSlice(subscript);
+    sub := Subscript.expandSlice(subscript, false);
 
     outExp := match sub
       case Subscript.INDEX() then applyIndexSubscriptRange(exp, sub);
@@ -2296,19 +2299,6 @@ public
     end match;
   end computeNominal;
 
-  function toAbsynOpt
-    input Option<Expression> exp;
-    output Option<Absyn.Exp> aexp;
-  algorithm
-    aexp := match exp
-      local
-        Expression e;
-
-      case SOME(e) then SOME(toAbsyn(e));
-      else NONE();
-    end match;
-  end toAbsynOpt;
-
   function toAbsyn
     input Expression exp;
     output Absyn.Exp aexp;
@@ -2328,7 +2318,7 @@ public
       case TYPENAME() then Absyn.Exp.CREF(Absyn.ComponentRef.CREF_IDENT(Type.toString(exp.ty), {}));
       case ARRAY() then Absyn.Exp.ARRAY(list(toAbsyn(e) for e in exp.elements));
       case MATRIX() then Absyn.Exp.MATRIX(list(list(toAbsyn(e) for e in l) for l in exp.elements));
-      case RANGE() then Absyn.Exp.RANGE(toAbsyn(exp.start), toAbsynOpt(exp.step), toAbsyn(exp.stop));
+      case RANGE() then Absyn.Exp.RANGE(toAbsyn(exp.start), Util.applyOption(exp.step, toAbsyn), toAbsyn(exp.stop));
       case TUPLE() then Absyn.Exp.TUPLE(list(toAbsyn(e) for e in exp.elements));
       case RECORD() then AbsynUtil.makeCall(AbsynUtil.pathToCref(exp.path), list(toAbsyn(e) for e in exp.elements));
       case CALL() then Call.toAbsyn(exp.call);
@@ -2359,19 +2349,6 @@ public
 
     end match;
   end toAbsyn;
-
-  function toDAEOpt
-    input Option<Expression> exp;
-    output Option<DAE.Exp> dexp;
-  algorithm
-    dexp := match exp
-      local
-        Expression e;
-
-      case SOME(e) then SOME(toDAE(e));
-      else NONE();
-    end match;
-  end toDAEOpt;
 
   function toDAE
     input Expression exp;
@@ -2442,7 +2419,7 @@ public
       case UNARY() then DAE.UNARY(Operator.toDAE(exp.operator), toDAE(exp.exp));
       case LBINARY() then DAE.LBINARY(toDAE(exp.exp1), Operator.toDAE(exp.operator), toDAE(exp.exp2));
       case LUNARY() then DAE.LUNARY(Operator.toDAE(exp.operator), toDAE(exp.exp));
-      case RELATION() then DAE.RELATION(toDAE(exp.exp1), Operator.toDAE(exp.operator), toDAE(exp.exp2), -1, NONE());
+      case RELATION() then DAE.RELATION(toDAE(exp.exp1), Operator.toDAE(exp.operator), toDAE(exp.exp2), exp.index, NONE());
       case IF() then DAE.IFEXP(toDAE(exp.condition), toDAE(exp.trueBranch), toDAE(exp.falseBranch));
       case CAST() then DAE.CAST(Type.toDAE(exp.ty), toDAE(exp.exp));
       case BOX() then DAE.BOX(toDAE(exp.exp));
@@ -2588,11 +2565,6 @@ public
       else
         DAE.RECORD(path, dargs, field_names, Type.toDAE(ty));
   end toDAERecord;
-
-  function toDAEValueOpt
-    input Option<Expression> exp;
-    output Option<Values.Value> value = Util.applyOption(exp, toDAEValue);
-  end toDAEValueOpt;
 
   function toDAEValue
     input Expression exp;
@@ -2776,7 +2748,7 @@ public
           e2 := map(exp.exp2, func);
         then
           if referenceEq(exp.exp1, e1) and referenceEq(exp.exp2, e2)
-            then exp else RELATION(e1, exp.operator, e2);
+            then exp else RELATION(e1, exp.operator, e2, exp.index);
 
       case IF()
         algorithm
@@ -2844,6 +2816,18 @@ public
 
     outExp := func(outExp);
   end map;
+
+  function fakeMap
+    "has an interface like map but just applies the function directly.
+    used for functions that map itself but need to use mapping interfaces"
+    input Expression exp;
+    input MapFunc func;
+    output Expression outExp = func(exp);
+
+    partial function MapFunc
+      input output Expression e;
+    end MapFunc;
+  end fakeMap;
 
   function mapOpt
     input Option<Expression> exp;
@@ -2962,7 +2946,7 @@ public
           e2 := mapReverse(exp.exp2, func);
         then
           if referenceEq(exp.exp1, e1) and referenceEq(exp.exp2, e2)
-            then exp else RELATION(e1, exp.operator, e2);
+            then exp else RELATION(e1, exp.operator, e2, exp.index);
 
       case IF()
         algorithm
@@ -3129,7 +3113,7 @@ public
           e2 := func(exp.exp2);
         then
           if referenceEq(exp.exp1, e1) and referenceEq(exp.exp2, e2)
-            then exp else RELATION(e1, exp.operator, e2);
+            then exp else RELATION(e1, exp.operator, e2, exp.index);
 
       case IF()
         algorithm
@@ -3845,7 +3829,7 @@ public
           (e2, arg) := mapFold(exp.exp2, func, arg);
         then
           if referenceEq(exp.exp1, e1) and referenceEq(exp.exp2, e2)
-            then exp else RELATION(e1, exp.operator, e2);
+            then exp else RELATION(e1, exp.operator, e2, exp.index);
 
       case IF()
         algorithm
@@ -4078,7 +4062,7 @@ public
           (e2, arg) := func(exp.exp2, arg);
         then
           if referenceEq(exp.exp1, e1) and referenceEq(exp.exp2, e2)
-            then exp else RELATION(e1, exp.operator, e2);
+            then exp else RELATION(e1, exp.operator, e2, exp.index);
 
       case IF()
         algorithm
@@ -4465,6 +4449,16 @@ public
     end match;
   end extractCref;
 
+  function isResizableCref
+    input Expression exp;
+    output Boolean b;
+  algorithm
+    b := match exp
+      case CREF() then ComponentRef.isResizable(exp.cref);
+      else false;
+    end match;
+  end isResizableCref;
+
   function isIterator
     input Expression exp;
     output Boolean isIterator;
@@ -4496,6 +4490,16 @@ public
       else false;
     end match;
   end isTime;
+
+  function isSubstitute
+    input Expression exp;
+    output Boolean b;
+  algorithm
+    b := match exp
+      case CREF() then ComponentRef.isSubstitute(exp.cref);
+      else false;
+    end match;
+  end isSubstitute;
 
   function isZero
     input Expression exp;
@@ -6564,18 +6568,40 @@ public
 
   function replaceResizableParameter
     input output Expression exp;
+  protected
+    function replaceWithBinding
+      input ComponentRef cref;
+      input output Expression exp;
+    protected
+      Expression e;
+    algorithm
+      exp := match InstNode.getBindingExpOpt(ComponentRef.node(cref))
+        case SOME(e as Expression.INTEGER()) then e;
+        case SOME(Expression.SUBSCRIPTED_EXP(exp = e as Expression.INTEGER())) then e;
+        else exp;
+      end match;
+    end replaceWithBinding;
   algorithm
     exp := match exp
       local
-        Expression e;
+        Pointer<Variable> var;
         Integer v;
-        Option<Integer> value;
-      case Expression.CREF() guard(Expression.variability(exp) == Variability.NON_STRUCTURAL_PARAMETER)
-      then match InstNode.getBindingExpOpt(ComponentRef.node(exp.cref))
-          case SOME(e as Expression.INTEGER()) then e;
-          case SOME(Expression.SUBSCRIPTED_EXP(exp = e as Expression.INTEGER())) then e;
-          else exp;
+
+      // backend replacement
+      case Expression.CREF(cref= ComponentRef.CREF(node = InstNode.VAR_NODE(varPointer = var))) guard(ComponentRef.isResizable(exp.cref))
+      then match Pointer.access(var)
+          // optimal value has already been determined
+          case Variable.VARIABLE(backendinfo = BackendInfo.BACKEND_INFO(varKind = VariableKind.PARAMETER(resize_value = SOME(v))))
+          then Expression.INTEGER(v);
+
+          // optimal value not yet computed
+          else replaceWithBinding(exp.cref, exp);
         end match;
+
+      // frontend replacement
+      case Expression.CREF() guard(ComponentRef.isResizable(exp.cref))
+      then replaceWithBinding(exp.cref, exp);
+
       else exp;
     end match;
   end replaceResizableParameter;

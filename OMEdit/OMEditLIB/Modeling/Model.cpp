@@ -36,6 +36,8 @@
 #include "Util/Helper.h"
 #include "MessagesWidget.h"
 #include "Options/OptionsDialog.h"
+#include "MainWindow.h"
+#include "OMC/OMCProxy.h"
 
 #include <QRectF>
 #include <QtMath>
@@ -842,6 +844,38 @@ namespace ModelInstance
     return pModifier && pModifier->getName().compare(modifier) == 0;
   }
 
+  /*!
+   * \brief createModifier
+   * Creates the Modifier from another Modifier.\n
+   * See issue #13301 and #13516.\n
+   * Dump the modifier as string and use OMCProxy::modifierToJSON to convert it to JSON.\n
+   * Contruct new Modifier instance with JSON.
+   * \param pModifier
+   * \return
+   */
+  Modifier *createModifier(const Modifier *pModifier, Model *pParentModel)
+  {
+    // If value is defined then we wrap within parenthesis otherwise its not needed.
+    if (pModifier->isValueDefined()) {
+      QJsonObject jsonObject = MainWindow::instance()->getOMCProxy()->modifierToJSON("(" % pModifier->toString() % ")");
+      return new Modifier(pModifier->getName(), jsonObject.value(pModifier->getName()), pParentModel);
+    } else {
+      QJsonObject jsonObject;
+      jsonObject.insert("modifiers", MainWindow::instance()->getOMCProxy()->modifierToJSON(pModifier->toString()));
+      return new Modifier(pModifier->getName(), jsonObject.value("modifiers"), pParentModel);
+    }
+  }
+
+  void Modifier::addModifier(const Modifier *pModifier)
+  {
+    mModifiers.append(createModifier(pModifier, mpParentModel));
+  }
+
+  bool Modifier::isBreak() const
+  {
+    return mValue.compare(Helper::BREAK) == 0 ? true : false;
+  }
+
   bool Modifier::isRedeclare() const
   {
     return mpElement && mpElement->isRedeclare();
@@ -1078,6 +1112,8 @@ namespace ModelInstance
     qDeleteAll(mElements);
     mElements.clear();
 
+    mImports.clear();
+
     qDeleteAll(mConnections);
     mConnections.clear();
 
@@ -1122,6 +1158,15 @@ namespace ModelInstance
     }
 
     updateMergedCoordinateSystem();
+
+    if (mModelJson.contains("imports")) {
+      for (const QJsonValue &import: mModelJson.value("imports").toArray()) {
+        QJsonObject importObject = import.toObject();
+        if (!importObject.isEmpty()) {
+          mImports.append(Import(importObject));
+        }
+      }
+    }
 
     if (mModelJson.contains("connections")) {
       for (const QJsonValue &connection: mModelJson.value("connections").toArray()) {
@@ -1353,6 +1398,22 @@ namespace ModelInstance
           pExtend->getModel()->readCoordinateSystemFromExtendsClass(pCoordinateSystem, isIcon);
         }
         break; // we only check coordinate system of first inherited class. See the comment in start of function i.e., "The coordinate systems of the first base-class ..."
+      }
+    }
+  }
+
+  /*!
+   * \brief Model::removeElement
+   * Removes the element.
+   * \param name
+   */
+  void Model::removeElement(const QString &name)
+  {
+    foreach (auto pElement, mElements) {
+      if (pElement->getName().compare(name) == 0) {
+        mElements.removeOne(pElement);
+        delete pElement;
+        break;
       }
     }
   }
@@ -2050,8 +2111,9 @@ namespace ModelInstance
     }
   }
 
-  QString Element::toString(bool skipTopLevel) const
+  QString Element::toString(bool skipTopLevel, bool mergeExtendsModifiers) const
   {
+    Q_UNUSED(mergeExtendsModifiers);
     if (mpPrefixes) {
       return mpPrefixes->toString(skipTopLevel);
     }
@@ -2158,9 +2220,9 @@ namespace ModelInstance
     return mBaseClass;
   }
 
-  QString Extend::toString(bool skipTopLevel) const
+  QString Extend::toString(bool skipTopLevel, bool mergeExtendsModifiers) const
   {
-    return Element::toString(skipTopLevel);
+    return Element::toString(skipTopLevel, mergeExtendsModifiers);
   }
 
   Component::Component(Model *pParentModel)
@@ -2232,6 +2294,73 @@ namespace ModelInstance
   }
 
   /*!
+   * \brief Component::getExtendsModifiers
+   * Makes a list of all extends modifiers.
+   * \param pParentModel
+   * \return
+   */
+  QList<Modifier*> Component::getExtendsModifiers(const Model *pParentModel) const
+  {
+    QList<Modifier*> modifiers;
+    if (pParentModel && pParentModel->getParentElement() && pParentModel->getParentElement()->getModifier()) {
+      Modifier *pExtentElementModifier = pParentModel->getParentElement()->getModifier();
+      foreach (auto *pSubModifier, pExtentElementModifier->getModifiers()) {
+        if (pSubModifier->getName().compare(mName) == 0) {
+          modifiers.append(pSubModifier);
+        }
+      }
+      modifiers.append(getExtendsModifiers(pExtentElementModifier->getParentModel()));
+    }
+    return modifiers;
+  }
+
+  /*!
+   * \brief Component::mergeModifiersIntoOne
+   * Merges the list of all extends modifiers into one modifier.
+   * \param extendsModifiers
+   * \return
+   */
+  Modifier *Component::mergeModifiersIntoOne(QList<Modifier *> extendsModifiers) const
+  {
+    Modifier *pModifier = nullptr;
+    if (!extendsModifiers.isEmpty()) {
+      pModifier = createModifier(extendsModifiers.last(), mpParentModel);
+      for (int i = extendsModifiers.size() - 2 ; i >= 0 ; i--) {
+        Component::mergeModifiers(pModifier, extendsModifiers.at(i));
+      }
+    }
+    return pModifier;
+  }
+
+  /*!
+   * \brief Component::mergeModifiers
+   * Merges pModifier2 into pModifier1
+   * \param pModifier1
+   * \param pModifier2
+   */
+  void Component::mergeModifiers(Modifier *pModifier1, Modifier *pModifier2)
+  {
+    foreach (auto pSubModifier2, pModifier2->getModifiers()) {
+      bool subModifierFound = false;
+      foreach (auto pSubModifier1, pModifier1->getModifiers()) {
+        /* if modifier exists then check if its value is defined
+         * if the value is not defined then merge sub modifiers
+         */
+        if (pSubModifier2->getName().compare(pSubModifier1->getName()) == 0) {
+          subModifierFound = true;
+          if (!pSubModifier1->isValueDefined()) {
+            Component::mergeModifiers(pSubModifier1, pSubModifier2);
+          }
+        }
+      }
+      // if modifier doesn't exist then add it
+      if (!subModifierFound) {
+        pModifier1->addModifier(pSubModifier2);
+      }
+    }
+  }
+
+  /*!
    * \brief Component::getQualifiedName
    * Returns the qualified name of the component.
    * \param includeBaseName
@@ -2259,11 +2388,11 @@ namespace ModelInstance
     return mType;
   }
 
-  QString Component::toString(bool skipTopLevel) const
+  QString Component::toString(bool skipTopLevel, bool mergeExtendsModifiers) const
   {
     QStringList value;
 
-    value.append(Element::toString(skipTopLevel));
+    value.append(Element::toString(skipTopLevel, mergeExtendsModifiers));
 
     if (mpPrefixes) {
       auto prefixes = mpPrefixes->typePrefixes();
@@ -2277,7 +2406,24 @@ namespace ModelInstance
       value.append("[" % dims % "]");
     }
     // modifiers
-    if (mpModifier) {
+    Modifier *pModifier = nullptr;
+    if (mergeExtendsModifiers) {
+      // Merge extends modifiers. See issue #13301 and #13516.
+      QList<Modifier *> extendsModifiers = getExtendsModifiers(mpParentModel);
+      pModifier = mergeModifiersIntoOne(extendsModifiers);
+    }
+    // if merge modifiers
+    if (pModifier) {
+      // if this modifier exists then merge it
+      if (mpModifier) {
+        Component::mergeModifiers(pModifier, mpModifier);
+      }
+      // we don't need the name coming from the extend modification
+      pModifier->setName("");
+      value.append(pModifier->toString());
+      delete pModifier;
+    } else if (mpModifier) {
+      // if there are no merged modifiers then just use this modifier if exists.
       value.append(mpModifier->toString());
     }
     // constrainedby issue #13300
@@ -2359,11 +2505,11 @@ namespace ModelInstance
     }
   }
 
-  QString ReplaceableClass::toString(bool skipTopLevel) const
+  QString ReplaceableClass::toString(bool skipTopLevel, bool mergeExtendsModifiers) const
   {
     QStringList value;
 
-    value.append(Element::toString(skipTopLevel));
+    value.append(Element::toString(skipTopLevel, mergeExtendsModifiers));
     value.append(mType);
     value.append(mName);
     if (!mBaseClass.isEmpty()) {
@@ -2491,6 +2637,17 @@ namespace ModelInstance
   QStringList Connector::getNameParts() const
   {
     return mName.getNameParts();
+  }
+
+  Import::Import(const QJsonObject &jsonObject)
+  {
+    if (jsonObject.contains("path")) {
+      mPath = jsonObject.value("path").toString();
+    }
+
+    if (jsonObject.contains("shortName")) {
+      mShortName = jsonObject.value("shortName").toString();
+    }
   }
 
   Connection::Connection(Model *pParentModel)

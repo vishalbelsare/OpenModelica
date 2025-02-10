@@ -594,6 +594,16 @@ public
     end match;
   end isFinal;
 
+  function isResizable
+    input Component component;
+    output Boolean b;
+  algorithm
+    b := match component
+      case COMPONENT(attributes = Attributes.ATTRIBUTES(isResizable = b)) then b;
+      else false;
+    end match;
+  end isResizable;
+
   function innerOuter
     input Component component;
     output InnerOuter io;
@@ -865,7 +875,7 @@ public
     evaluate := SCodeUtil.getEvaluateAnnotation(comment(component));
   end getEvaluateAnnotation;
 
-  function getFixedAttribute
+  function isFixed
     input Component component;
     output Boolean fixed;
   protected
@@ -891,7 +901,7 @@ public
         else false;
       end match;
     end if;
-  end getFixedAttribute;
+  end isFixed;
 
   function getUnitAttribute
     input Component component;
@@ -996,7 +1006,7 @@ public
       if isRoot then
         comp_size := 1;
       elseif Type.hasKnownSize(ty) then
-        comp_size := Dimension.sizesProduct(Type.arrayDims(ty));
+        comp_size := Dimension.sizesProduct(Type.arrayDims(ty), false);
       else
         comp_size := 0;
         knownSize := false;

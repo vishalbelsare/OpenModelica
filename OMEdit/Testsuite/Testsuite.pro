@@ -37,7 +37,8 @@ SUBDIRS = Util \
   Homotopy \
   Expression \
   ModelInstance \
-  Utilities
+  Utilities \
+  StringHandler
 
 BrowseMSL.depends = Util
 Diagram.depends = Util
@@ -46,3 +47,4 @@ Homotopy.depends = Util
 Expression.depends = Util
 ModelInstance.depends = Util
 Utilities.depends = Util
+StringHandler.depends = Util

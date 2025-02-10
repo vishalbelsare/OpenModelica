@@ -463,9 +463,9 @@ private:
     void deserialize(const QJsonObject &jsonObject);
 
     const QStringList &getAbsynDimensions() const {return mAbsynDims;}
-    QString getAbsynDimensionsString() const {return mAbsynDims.join(", ");}
+    QString getAbsynDimensionsString(const QString &separator = ", ") const {return mAbsynDims.join(separator);}
     const QStringList &getTypedDimensions() const {return mTypedDims;}
-    QString getTypedDimensionsString() const {return mTypedDims.join(", ");}
+    QString getTypedDimensionsString(const QString &separator = ", ") const {return mTypedDims.join(separator);}
     bool isArray() const {return !mTypedDims.isEmpty();}
   private:
     QStringList mAbsynDims;
@@ -480,7 +480,9 @@ private:
     ~Modifier();
     void deserialize(const QJsonValue &jsonValue);
 
+    Model* getParentModel() const {return mpParentModel;}
     const QString &getName() const {return mName;}
+    void setName(const QString &newName) {mName = newName;}
     const QString &getType() const {return mType;}
     QString getValueWithoutQuotes() const {return StringHandler::removeFirstLastQuotes(getValue());}
     bool isValueDefined() const {return mValueDefined;}
@@ -489,11 +491,14 @@ private:
     QPair<QString, bool> getModifierValue(const QString &modifier) const;
     bool hasModifier(const QString &modifier) const;
     const QList<Modifier*> &getModifiers() const {return mModifiers;}
+    void addModifier(const Modifier *pModifier);
     bool isFinal() const {return mFinal;}
     bool isEach() const {return mEach;}
+    bool isBreak() const;
     bool isRedeclare() const;
     bool isReplaceable() const;
     const QString &getValue() const {return mValue;}
+    const QString &getComment() const {return mComment;}
     QPair<QString, bool> getModifierValue(QStringList qualifiedModifierName) const;
   private:
     Model *mpParentModel;
@@ -582,6 +587,7 @@ private:
   };
 
   class Component;
+  class Import;
   class Connection;
   class Transition;
   class InitialState;
@@ -618,9 +624,11 @@ private:
     Annotation *getAnnotation() const;
     void readCoordinateSystemFromExtendsClass(CoordinateSystem *pCoordinateSystem, bool isIcon);
     void addElement(Element *pElement) {mElements.append(pElement);}
+    void removeElement(const QString &name);
     const QList<Element *> &getElements() const {return mElements;}
     QList<Element *> getComponents() const;
     size_t componentCount() const;
+    const QList<Import> &getImports() const {return mImports;}
     const QList<Connection *> &getConnections() const {return mConnections;}
     const QList<Transition *> &getTransitions() const {return mTransitions;}
     const QList<InitialState *> &getInitialStates() const {return mInitialStates;}
@@ -651,6 +659,7 @@ private:
     QString mComment;
     std::unique_ptr<Annotation> mpAnnotation;
     QList<Element*> mElements;
+    QList<Import> mImports;
     QList<Connection*> mConnections;
     QList<Transition*> mTransitions;
     QList<InitialState*> mInitialStates;
@@ -700,7 +709,7 @@ private:
     virtual bool isComponent() const = 0;
     virtual bool isExtend() const = 0;
     virtual bool isClass() const = 0;
-    virtual QString toString(bool skipTopLevel = false) const;
+    virtual QString toString(bool skipTopLevel = false, bool mergeExtendsModifiers = false) const;
 
     QString getDirection() const;
   private:
@@ -738,7 +747,7 @@ private:
     virtual bool isComponent() const override {return false;}
     virtual bool isExtend() const override {return true;}
     virtual bool isClass() const override {return false;}
-    virtual QString toString(bool skipTopLevel = false) const override;
+    virtual QString toString(bool skipTopLevel = false, bool mergeExtendsModifiers = false) const override;
   };
 
   class Component : public Element
@@ -752,6 +761,9 @@ private:
     void setType(const QString &type) {mType = type;}
   private:
     void deserialize_impl(const QJsonObject &jsonObject) override;
+    QList<Modifier*> getExtendsModifiers(const Model *pParentModel) const;
+    Modifier *mergeModifiersIntoOne(QList<Modifier*> extendsModifiers) const;
+    static void mergeModifiers(Modifier *pModifier1, Modifier *pModifier2);
   private:
     QString mName;
     bool mCondition = true;
@@ -767,7 +779,7 @@ private:
     virtual bool isComponent() const override {return true;}
     virtual bool isExtend() const override {return false;}
     virtual bool isClass() const override {return false;}
-    virtual QString toString(bool skipTopLevel = false) const override;
+    virtual QString toString(bool skipTopLevel = false, bool mergeExtendsModifiers = false) const override;
   };
 
   class ReplaceableClass : public Element
@@ -795,7 +807,7 @@ private:
     virtual bool isComponent() const override {return false;}
     virtual bool isExtend() const override {return false;}
     virtual bool isClass() const override {return true;}
-    virtual QString toString(bool skipTopLevel = false) const override;
+    virtual QString toString(bool skipTopLevel = false, bool mergeExtendsModifiers = false) const override;
   };
 
   class Part
@@ -840,6 +852,18 @@ private:
   private:
     QString mKind;
     Name mName;
+  };
+
+  class Import
+  {
+  public:
+    Import(const QJsonObject &jsonObject);
+
+    QString getPath() const {return mPath;}
+    QString getShortName() const {return mShortName;}
+  private:
+    QString mPath;
+    QString mShortName;
   };
 
   class Connection

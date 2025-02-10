@@ -594,6 +594,18 @@ algorithm
   osyst := setEqSystVars(syst, BackendVariable.addVars(varlst, vars));
 end addVarsToEqSystem;
 
+public function getSimIteratorSize
+  input list<BackendDAE.SimIterator> iters;
+  output Integer size = 1;
+protected
+  Integer local_size;
+algorithm
+  for iter in iters loop
+    local_size := match iter case BackendDAE.SIM_ITERATOR_RANGE() then iter.size; case BackendDAE.SIM_ITERATOR_LIST() then iter.size; end match;
+    size := size * local_size;
+  end for;
+end getSimIteratorSize;
+
 public function numberOfZeroCrossings "author: lochel"
   input BackendDAE.BackendDAE inBackendDAE;
   output Integer outNumZeroCrossings "number of ordinary zero crossings" ;
@@ -1375,7 +1387,7 @@ algorithm
     if oMark[eqn] == 0 then // "Mark an unmarked node/equation"
       arrayUpdate(oMark, eqn, 1);
       for i in m[eqn] loop
-        if i>0 and i<=len then
+        if i>0 and i <= len then
           // We already did bounds checking above
           j := Dangerous.arrayGetNoBoundsChecking(ass1, i);
           positiveAndUnmarked := (if j>0 then arrayGet(oMark, j) == 0 else false);
@@ -4932,22 +4944,24 @@ algorithm
     // 2. vars occur in all branches: check how they are occur
     // 3. vars occur not in all branches: mark as unsolvable
     case(vars, BackendDAE.IF_EQUATION(conditions=expl,eqnstrue=eqnslst,eqnsfalse=eqnselse),_,_,_)
-      equation
+      algorithm
         //print("Warning: BackendDAEUtil.adjacencyRowEnhanced does not handle if-equations propper!\n");
         // mark all negative because the when condition cannot used to solve a variable
-        lst = List.fold4(expl, adjacencyRowExpEnhanced, vars, mark, rowmark, isInitial, {});
-        _ = List.fold1(lst,markNegativ,rowmark,mark);
-        row1 = adjacencyRowEnhanced1(lst,DAE.RCONST(0.0),DAE.RCONST(0.0),vars,globalKnownVars,mark,rowmark,{},trytosolve,1,shared);
+        lst := List.fold4(expl, adjacencyRowExpEnhanced, vars, mark, rowmark, isInitial, {});
+        _ := List.fold1(lst,markNegativ,rowmark,mark);
+        row1 := adjacencyRowEnhanced1(lst,DAE.RCONST(0.0),DAE.RCONST(0.0),vars,globalKnownVars,mark,rowmark,{},trytosolve,1,shared);
 
-        (row, size) = adjacencyRowEnhancedEqnLst(eqnselse, vars, mark, rowmark, globalKnownVars, trytosolve,shared);
-        lst = List.map(row,Util.tuple31);
+        (row, size) := adjacencyRowEnhancedEqnLst(eqnselse, vars, mark, rowmark, globalKnownVars, trytosolve,shared);
+        lst := List.map(row,Util.tuple31);
 
-        (lst, row, _) = List.fold6(eqnslst, adjacencyRowEnhancedEqnLstIfBranches, vars, mark, rowmark, globalKnownVars, trytosolve, shared, (lst, row, size));
+        for eq in eqnslst loop
+          (lst, row, _) := adjacencyRowEnhancedEqnLstIfBranches(eq, vars, mark, rowmark, globalKnownVars, trytosolve, shared, (lst, row, size));
+        end for;
 
-        lstall = List.map(row, Util.tuple31);
-        (_, lst, _) = List.intersection1OnTrue(lstall, lst, intEq);
-        _ = List.fold1(lst, markNegativ, rowmark, mark);
-        row = listAppend(row1,row);
+        lstall := List.map(row, Util.tuple31);
+        (_, lst, _) := List.intersection1OnTrue(lstall, lst, intEq);
+        _ := List.fold1(lst, markNegativ, rowmark, mark);
+        row := listAppend(row1,row);
       then
         (row,size);
 

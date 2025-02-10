@@ -695,9 +695,8 @@ algorithm
         sp = SCodeUtil.removeBuiltinsFromTopScope(sp);
         paths = Interactive.getSCodeClassNamesRecursive(sp);
         // paths = bcallret2(sort, List.sort, paths, AbsynUtil.pathGe, paths);
-        vals = List.map(paths,ValuesUtil.makeCodeTypeName);
       then
-        ValuesUtil.makeArray(vals);
+        ValuesUtil.makeCodeTypeNameArray(paths);
 
     case ("getUsedClassNames",_)
       then ValuesUtil.makeArray({});
@@ -716,16 +715,14 @@ algorithm
     case ("getPackages",{Values.CODE(Absyn.C_TYPENAME(Absyn.IDENT("AllLoadedClasses")))})
       equation
         paths = Interactive.getTopPackages(SymbolTable.getAbsyn());
-        vals = List.map(paths,ValuesUtil.makeCodeTypeName);
       then
-        ValuesUtil.makeArray(vals);
+        ValuesUtil.makeCodeTypeNameArray(paths);
 
     case ("getPackages",{Values.CODE(Absyn.C_TYPENAME(path))})
       equation
         paths = Interactive.getPackagesInPath(path, SymbolTable.getAbsyn());
-        vals = List.map(paths,ValuesUtil.makeCodeTypeName);
       then
-        ValuesUtil.makeArray(vals);
+        ValuesUtil.makeCodeTypeNameArray(paths);
 
     case ("convertUnits",{Values.STRING(str1),Values.STRING(str2)})
       equation
@@ -1750,7 +1747,7 @@ algorithm
       Option<DAE.DAElist> odae;
       Values.Value v,cvar,cvar2,v1,v2;
       Absyn.ComponentRef cr, cr2;
-      Integer size,i,n,curveStyle,numberOfIntervals;
+      Integer size,i,n,curveStyle,numberOfIntervals,x,y;
       Access access;
       list<String> vars_1,args,strings,strs1,strs2,files;
       Real timeStamp,val,x1,x2,y1,y2,r1,r2,curveWidth, interval;
@@ -2080,9 +2077,8 @@ algorithm
     case ("getInheritedClasses",{Values.CODE(Absyn.C_TYPENAME(classpath))})
       equation
         paths = Interactive.getInheritedClasses(classpath);
-        vals = List.map(paths,ValuesUtil.makeCodeTypeName);
       then
-        ValuesUtil.makeArray(vals);
+        ValuesUtil.makeCodeTypeNameArray(paths);
 
     case ("getInheritedClasses",_)
       then ValuesUtil.makeArray({});
@@ -2573,6 +2569,12 @@ algorithm
       then
         Values.BOOL(b);
 
+    case ("getExtendsModifierValue",
+          {Values.CODE(Absyn.C_TYPENAME(classpath)),
+           Values.CODE(Absyn.C_TYPENAME(baseClassPath)),
+           Values.CODE(Absyn.C_TYPENAME(path))})
+      then Interactive.getExtendsModifierValue(classpath, baseClassPath, path, SymbolTable.getAbsyn());
+
     case ("setExtendsModifierValue",
           {Values.CODE(Absyn.C_TYPENAME(classpath)),
            Values.CODE(Absyn.C_TYPENAME(baseClassPath)),
@@ -2593,6 +2595,12 @@ algorithm
         SymbolTable.setAbsyn(p);
       then
         Values.BOOL(b);
+
+    case ("isExtendsModifierFinal",
+          {Values.CODE(Absyn.C_TYPENAME(classpath)),
+           Values.CODE(Absyn.C_TYPENAME(baseClassPath)),
+           Values.CODE(Absyn.C_TYPENAME(path))})
+      then Interactive.isExtendsModifierFinal(classpath, baseClassPath, path, SymbolTable.getAbsyn());
 
     case ("removeComponentModifiers",
         Values.CODE(Absyn.C_TYPENAME(path))::
@@ -3078,9 +3086,9 @@ algorithm
         Values.BOOL(b);
 
     case ("loadClassContentString",
-          {Values.STRING(str), Values.CODE(Absyn.C_TYPENAME(classpath))})
+          {Values.STRING(str), Values.CODE(Absyn.C_TYPENAME(classpath)), Values.INTEGER(x), Values.INTEGER(y)})
       algorithm
-        (p, b) := InteractiveUtil.loadClassContentString(str, classpath, SymbolTable.getAbsyn());
+        (p, b) := InteractiveUtil.loadClassContentString(str, classpath, x, y, SymbolTable.getAbsyn());
         SymbolTable.setAbsyn(p);
       then
         Values.BOOL(b);
@@ -3116,6 +3124,19 @@ algorithm
         SymbolTable.setAbsyn(p);
       then
         ValuesUtil.makeBoolean(b);
+
+    case ("setComponentProperties", {Values.CODE(Absyn.C_TYPENAME(classpath)),
+        Values.CODE(Absyn.C_TYPENAME(Absyn.IDENT(name))),
+        Values.ARRAY(valueLst = vals),
+        Values.ARRAY(valueLst = {Values.STRING(s1)}),
+        Values.ARRAY(valueLst = {Values.BOOL(b1), Values.BOOL(b2)}),
+        Values.ARRAY(valueLst = {Values.STRING(s2)})})
+      algorithm
+        (p, v) := Interactive.setComponentProperties(classpath, name,
+          list(ValuesUtil.valueBool(va) for va in vals), s1, b1, b2, s2, SymbolTable.getAbsyn());
+        SymbolTable.setAbsyn(p);
+      then
+        v;
 
     case ("createModel", {Values.CODE(Absyn.C_TYPENAME(classpath))})
       algorithm
@@ -3176,6 +3197,9 @@ algorithm
 
     case ("getElements", {Values.CODE(Absyn.C_TYPENAME(classpath)), Values.BOOL(b)})
       then Interactive.getElements(classpath, b, SymbolTable.getAbsyn());
+
+    case ("getElementsInfo", {Values.CODE(Absyn.C_TYPENAME(classpath))})
+      then Interactive.getElementsInfo(classpath, SymbolTable.getAbsyn());
 
     case ("getComponentAnnotations", {Values.CODE(Absyn.C_TYPENAME(classpath))})
       then Interactive.getComponentAnnotations(classpath, SymbolTable.getAbsyn());
@@ -3281,6 +3305,38 @@ algorithm
         SymbolTable.setAbsyn(p);
       then
         ValuesUtil.makeBoolean(b);
+
+    case ("renameClass", {Values.CODE(Absyn.C_TYPENAME(classpath)), Values.CODE(Absyn.C_TYPENAME(path))})
+      algorithm
+        (p, v) := Interactive.renameClass(classpath, path, SymbolTable.getAbsyn());
+        SymbolTable.setAbsyn(p);
+      then
+        v;
+
+    case ("renameComponent", {Values.CODE(Absyn.C_TYPENAME(classpath)), Values.CODE(Absyn.C_VARIABLENAME(cr)),
+                              Values.CODE(Absyn.C_VARIABLENAME(cr2))})
+      algorithm
+        (p, v) := Interactive.renameComponent(classpath, cr, cr2, SymbolTable.getAbsyn());
+        SymbolTable.setAbsyn(p);
+      then
+        v;
+
+    case ("renameComponentInClass", {Values.CODE(Absyn.C_TYPENAME(classpath)), Values.CODE(Absyn.C_VARIABLENAME(cr)),
+                              Values.CODE(Absyn.C_VARIABLENAME(cr2))})
+      algorithm
+        (p, v) := Interactive.renameComponentOnlyInClass(classpath, cr, cr2, SymbolTable.getAbsyn());
+        SymbolTable.setAbsyn(p);
+      then
+        v;
+
+    case ("getCrefInfo", {Values.CODE(Absyn.C_TYPENAME(classpath))})
+      then Interactive.getCrefInfo(classpath, SymbolTable.getAbsyn());
+
+    case ("getDefaultComponentName", {Values.CODE(Absyn.C_TYPENAME(classpath))})
+      then Interactive.getDefaultComponentName(classpath, SymbolTable.getAbsyn());
+
+    case ("getDefaultComponentPrefixes", {Values.CODE(Absyn.C_TYPENAME(classpath))})
+      then Interactive.getDefaultComponentPrefixes(classpath, SymbolTable.getAbsyn());
 
  end matchcontinue;
 end cevalInteractiveFunctions4;

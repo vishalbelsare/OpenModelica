@@ -2188,16 +2188,16 @@ algorithm
     DAE.Exp exp;
     list<Integer> occurEquLst;
     list<BackendDAE.ZeroCrossing> rest;
+    Option<list<BackendDAE.SimIterator>> iter;
 
    case ({}, _, _) then Dangerous.listReverseInPlace(iAccum);
 
-   case (BackendDAE.ZERO_CROSSING(relation_=exp, occurEquLst=occurEquLst)::rest, _, _)
+   case (BackendDAE.ZERO_CROSSING(relation_=exp, occurEquLst=occurEquLst,iter=iter)::rest, _, _)
      equation
        occurEquLst = convertListIndx(occurEquLst, eqBackendSimCodeMappingArray);
-       ozeroCrossings = updateZeroCrossEqnIndexHelp(rest, eqBackendSimCodeMappingArray, BackendDAE.ZERO_CROSSING(0, exp, occurEquLst, NONE())::iAccum);
+       ozeroCrossings = updateZeroCrossEqnIndexHelp(rest, eqBackendSimCodeMappingArray, BackendDAE.ZERO_CROSSING(0, exp, occurEquLst, iter)::iAccum);
      then
        ozeroCrossings;
-
   end match;
 end updateZeroCrossEqnIndexHelp;
 
@@ -7813,9 +7813,6 @@ protected
   Integer numZeroCrossings, numTimeEvents, numRelations, numMathEventFunctions;
 algorithm
   (numZeroCrossings, numTimeEvents, numRelations, numMathEventFunctions) := BackendDAEUtil.numberOfZeroCrossings(dlow);
-  numZeroCrossings := numZeroCrossings;
-  numTimeEvents := numTimeEvents;
-  numRelations := numRelations;
   varInfo := SimCode.VARINFO(numZeroCrossings, numTimeEvents, numRelations, numMathEventFunctions, nx, ny, ndy, ny_int, ny_bool, na, na_int, na_bool, np, np_int, np_bool, numOutVars, numInVars,
           next, ny_string, np_string, na_string, 0, 0, 0, 0, numStateSets,0,numOptimizeConstraints, numOptimizeFinalConstraints, 0, 0, 0, numRealInputVars, 0, 0);
 end createVarInfo;
@@ -8863,11 +8860,7 @@ algorithm
     case SimCodeVar.NEGATEDALIAS(varName = cr) then " (negated alias: " + ComponentReference.printComponentRefStr(cr) + ") ";
   end match);
   s := s + (if inVar.isProtected then " protected " else "");
-  s := s + (match inVar.hideResult
-    local Boolean bval;
-    case SOME(bval) then (if bval then " hideResult " else "");
-    else "";
-  end match);
+  s := s + (if Util.getOptionOrDefault(inVar.hideResult, false) then " hideResult " else "");
   s := s + " initial: " + (if Util.isSome(inVar.initialValue) then ExpressionDump.printOptExpStr(inVar.initialValue) else "");
   s := s + (if Util.isSome(inVar.arrayCref) then "\tarrCref:" + ComponentReference.printComponentRefStr(Util.getOption(inVar.arrayCref)) else "\tno arrCref");
   s := s + " index:(" + (if Util.isSome(inVar.variable_index) then intString(Util.getOption(inVar.variable_index)) else "") + ")";
@@ -16007,18 +16000,6 @@ algorithm
   cmakeVersion := SemanticVersion.parse(cmakeVersionString);
   System.removeFile(cmakeVersionLogFile);
 end getCMakeVersion;
-
-function getSimIteratorSize
-  input list<BackendDAE.SimIterator> iters;
-  output Integer size = 1;
-protected
-  Integer local_size;
-algorithm
-  for iter in iters loop
-    local_size := match iter case BackendDAE.SIM_ITERATOR_RANGE() then iter.size; case BackendDAE.SIM_ITERATOR_LIST() then iter.size; end match;
-    size := size * local_size;
-  end for;
-end getSimIteratorSize;
 
 public function getExpNominal
   "Returns the nominal value of an expression.

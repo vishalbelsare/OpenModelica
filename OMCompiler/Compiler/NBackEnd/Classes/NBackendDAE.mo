@@ -336,7 +336,7 @@ public
       (func, name) := module;
       if  Flags.isSet(Flags.FAILTRACE) then
         debugStr := "[failtrace] ........ [" + ClockIndexes.toString(clock_idx) + "] " + name;
-        debugStr := debugStr + StringUtil.repeat(".", 50 - stringLength(debugStr));
+        debugStr := debugStr + StringUtil.repeat(".", intMax(60 - stringLength(debugStr), 0));
       end if;
       if clock_idx <> -1 then
         System.realtimeClear(clock_idx);
@@ -360,7 +360,7 @@ public
           if Util.tuple21(varSizes) <> Util.tuple21(eqnSizes) then
             debugStr := debugStr + "XX ";
           end if;
-          debugStr := debugStr + StringUtil.repeat(".", 100 - stringLength(debugStr));
+          debugStr := debugStr + StringUtil.repeat(".", intMax(100 - stringLength(debugStr), 0));
           debugStr := debugStr + " " + realString(clock_time) + "s\n";
           print(debugStr);
         end if;
@@ -544,7 +544,7 @@ protected
         then ();
 
         case VariableKind.PARAMETER() algorithm
-          if BVariable.isResizable(lowVar_ptr) then
+          if BVariable.isResizableParameter(lowVar_ptr) then
             resizables_lst := lowVar_ptr :: resizables_lst;
           else
             parameters_lst := lowVar_ptr :: parameters_lst;
@@ -612,7 +612,10 @@ protected
     variables       := VariablePointers.addList(binding_iter_lst, variables);
     knowns          := VariablePointers.addList(binding_iter_lst, knowns);
     artificials     := VariablePointers.addList(binding_iter_lst, artificials);
+
+    // lower the component references properly
     variables       := VariablePointers.map(variables, function Variable.mapExp(fn = function lowerComponentReferenceExp(variables = variables)));
+    variables       := VariablePointers.map(variables, function Variable.applyToType(func = function Type.applyToDims(func = function lowerDimension(variables = variables))));
 
     /* lower the records to add children */
     records         := VariablePointers.mapPtr(records, function lowerRecordChildren(variables = variables));
@@ -633,7 +636,7 @@ protected
   algorithm
     try
       attributes := VariableAttributes.create(var.typeAttributes, var.ty, var.attributes, var.children, var.comment);
-      annotations := Annotations.create(var.comment);
+      annotations := Annotations.create(var.comment, var.attributes);
 
       // only change varKind if unset (Iterators are set before)
       var.backendinfo := match var.backendinfo
@@ -693,9 +696,9 @@ protected
       case (NFPrefixes.Variability.DISCRETE, _, _)                    then VariableKind.DISCRETE();
       case (NFPrefixes.Variability.IMPLICITLY_DISCRETE, _, _)         then VariableKind.DISCRETE();
 
-      case (NFPrefixes.Variability.PARAMETER, _, _)                   then VariableKind.PARAMETER();
-      case (NFPrefixes.Variability.STRUCTURAL_PARAMETER, _, _)        then VariableKind.PARAMETER(); // CONSTANT ?
-      case (NFPrefixes.Variability.NON_STRUCTURAL_PARAMETER, _, _)    then VariableKind.PARAMETER();
+      case (NFPrefixes.Variability.PARAMETER, _, _)                   then VariableKind.PARAMETER(NONE());
+      case (NFPrefixes.Variability.STRUCTURAL_PARAMETER, _, _)        then VariableKind.PARAMETER(NONE()); // CONSTANT ?
+      case (NFPrefixes.Variability.NON_STRUCTURAL_PARAMETER, _, _)    then VariableKind.PARAMETER(NONE());
       case (NFPrefixes.Variability.CONSTANT, _, _)                    then VariableKind.CONSTANT();
 
       else algorithm
@@ -778,11 +781,12 @@ protected
 
     (simulation_lst, continuous_lst, clocked_lst, discretes_lst, initials_lst, auxiliaries_lst, removed_lst) := BEquation.typeList(EquationPointers.toList(equations));
 
-    equations := Resizable.main(equations, varData);
+    equations := EquationPointers.removeList(clocked_lst, equations);
+    equations := Resizable.resize(equations, varData);
 
     eqData := BEquation.EQ_DATA_SIM(
       uniqueIndex = idx,
-      equations   = EquationPointers.removeList(clocked_lst, equations),
+      equations   = equations,
       simulation  = EquationPointers.fromList(simulation_lst),
       continuous  = EquationPointers.fromList(continuous_lst),
       clocked     = EquationPointers.fromList(clocked_lst),
@@ -894,7 +898,7 @@ protected
             body_elem := Pointer.access(body_elem_ptr);
             body_elem := BEquation.FOR_EQUATION(
               size    = Expression.rangeSize(range) * Equation.size(body_elem_ptr),
-              iter    = Iterator.SINGLE(iterator, range),
+              iter    = Iterator.SINGLE(iterator, range, NONE()),
               body    = {body_elem},
               source  = frontend_equation.source,
               attr    = Equation.getAttributes(body_elem)
@@ -1224,7 +1228,7 @@ protected
     list<ComponentRef> inputs, outputs;
     EquationAttributes attr;
   algorithm
-    size := sum(ComponentRef.size(out, true) for out in alg.outputs);
+    size := sum(ComponentRef.size(out, false) for out in alg.outputs);
 
     if listEmpty(alg.outputs) then
       attr := EquationAttributes.default(EquationKind.EMPTY, init);
@@ -1277,11 +1281,28 @@ protected
         call.iters := list(Util.applyTuple21(tpl, function lowerInstNode(variables = variables)) for tpl in call.iters);
         exp.call := call;
       then exp;
+
       else exp;
     end match;
+
+    // also lower dimensions in the case of resizable variables
+    exp := Expression.applyToType(exp, function Type.applyToDims(func = function lowerDimension(variables = variables)));
   end lowerComponentReferenceExp;
 
-  protected function lowerComponentReference
+  protected function lowerDimension
+    input output Dimension dim;
+    input VariablePointers variables;
+  algorithm
+    dim := match dim
+      case Dimension.RESIZABLE() algorithm
+        dim.exp := Expression.map(dim.exp, function lowerComponentReferenceExp(variables = variables));
+      then dim;
+
+      else dim;
+    end match;
+  end lowerDimension;
+
+  function lowerComponentReference
     input output ComponentRef cref;
     input VariablePointers variables;
   protected

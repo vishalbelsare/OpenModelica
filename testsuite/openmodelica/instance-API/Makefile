@@ -14,6 +14,8 @@ GetModelInstanceAnnotation9.mos \
 GetModelInstanceAnnotation10.mos \
 GetModelInstanceAnnotation11.mos \
 GetModelInstanceAnnotation12.mos \
+GetModelInstanceAnnotation13.mos \
+GetModelInstanceAnnotation14.mos \
 GetModelInstanceAttributes1.mos \
 GetModelInstanceAttributes2.mos \
 GetModelInstanceBinding1.mos \
@@ -58,6 +60,8 @@ GetModelInstanceIcon1.mos \
 GetModelInstanceIcon2.mos \
 GetModelInstanceIcon3.mos \
 GetModelInstanceIcon4.mos \
+GetModelInstanceImport1.mos \
+GetModelInstanceImport2.mos \
 GetModelInstanceInnerOuter1.mos \
 GetModelInstanceInnerOuter2.mos \
 GetModelInstanceInnerOuter3.mos \

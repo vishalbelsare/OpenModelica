@@ -52,6 +52,7 @@ protected
   import StringUtil;
   import Variable = NFVariable;
   import Binding = NFBinding;
+  import NFBackendExtension.{BackendInfo, Annotations};
 
   import ComponentRef = NFComponentRef;
 
@@ -172,6 +173,28 @@ public
     end match;
   end isSimple;
 
+  function isTopLevel
+    input ComponentRef cref;
+    output Boolean b;
+  protected
+    function isTopLevelRecord
+      input ComponentRef cref;
+      output Boolean b;
+    algorithm
+      b := match cref
+        case CREF() then Type.isRecord(cref.ty) and isTopLevelRecord(cref.restCref);
+        case EMPTY() then true;
+        else false;
+      end match;
+    end isTopLevelRecord;
+  algorithm
+    b := match cref
+      case CREF(restCref = EMPTY()) then true;
+      case CREF() then isTopLevelRecord(cref.restCref);
+      else false;
+    end match;
+  end isTopLevel;
+
   function isCref
     input ComponentRef cref;
     output Boolean isCref;
@@ -221,6 +244,28 @@ public
       else false;
     end match;
   end isNameNode;
+
+  function isEqualRecordChild
+    "R.x and R can be considered equal in certain cases if x is the only attribute of R"
+    input ComponentRef child;
+    input ComponentRef recd;
+    output Boolean b = ComponentRef.size(child, true) == ComponentRef.size(recd, true);
+  algorithm
+    if b then
+      b := isRecordChild(child, recd);
+    end if;
+  end isEqualRecordChild;
+
+  function isRecordChild
+    input ComponentRef child;
+    input ComponentRef recd;
+    output Boolean b;
+  algorithm
+    b := match recd
+      case CREF() then ComponentRef.isEqual(child, recd) or isRecordChild(child, recd.restCref);
+      else false;
+    end match;
+  end isRecordChild;
 
   function node
     input ComponentRef cref;
@@ -318,6 +363,22 @@ public
     CREF(ty = ty) := cref;
     ty := Type.arrayElementType(ty);
   end scalarType;
+
+  function applyToType
+    input output ComponentRef cref;
+    input typeFunc func;
+    partial function typeFunc
+      input output Type ty;
+    end typeFunc;
+  algorithm
+    cref := match cref
+      case CREF() algorithm
+        cref.ty := func(cref.ty);
+        cref.restCref := applyToType(cref.restCref, func);
+      then cref;
+      else cref;
+    end match;
+  end applyToType;
 
   function firstName
     input ComponentRef cref;
@@ -495,6 +556,30 @@ public
       else Variability.CONTINUOUS;
     end match;
   end nodeVariability;
+
+  function isResizable
+    "Returns true if the cref refers to a resizable component (frontend) or variable (backend)."
+    input ComponentRef cref;
+    output Boolean b;
+  algorithm
+    b := match cref
+      local
+        Pointer<Variable> v;
+
+      // frontend check
+      case CREF(node = InstNode.COMPONENT_NODE())
+        then Component.isResizable(InstNode.component(cref.node));
+
+      // backend check
+      case CREF(node = InstNode.VAR_NODE(varPointer = v)) then match Pointer.access(v)
+          case Variable.VARIABLE(backendinfo = BackendInfo.BACKEND_INFO(annotations = Annotations.ANNOTATIONS(resizable = b))) then b;
+          else false;
+        end match;
+
+      // default
+      else false;
+    end match;
+  end isResizable;
 
   function subscriptsVariability
     input ComponentRef cref;
@@ -1451,6 +1536,7 @@ public
 
   function scalarize
     input ComponentRef cref;
+    input Boolean resize;
     output list<ComponentRef> crefs;
   algorithm
     crefs := match cref
@@ -1461,7 +1547,7 @@ public
       case CREF(ty = Type.ARRAY())
         algorithm
           dims := Type.arrayDims(cref.ty);
-          subs := Subscript.scalarizeList(cref.subscripts, dims);
+          subs := Subscript.scalarizeList(cref.subscripts, dims, resize);
           subs := List.combination(subs);
         then
           list(setSubscripts(s, cref) for s in subs);
@@ -1472,13 +1558,14 @@ public
 
   function scalarizeAll
     input ComponentRef cref;
+    input Boolean resize;
     output list<ComponentRef> crefs;
   protected
     ComponentRef next = cref;
     list<list<ComponentRef>> nested_crefs = {};
   algorithm
     while not isEmpty(next) loop
-      nested_crefs := scalarize(next) :: nested_crefs;
+      nested_crefs := scalarize(next, resize) :: nested_crefs;
       CREF(restCref = next) := next;
     end while;
     crefs := scalarizeAll_Nesting(nested_crefs);
@@ -1516,13 +1603,14 @@ public
   function scalarizeSlice
     input ComponentRef cref;
     input list<Integer> slice = {}  "optional slice, empty list means all";
+    input Boolean resize;
     output list<ComponentRef> crefs;
   protected
     ComponentRef next = cref;
     list<list<ComponentRef>> nested_crefs = {};
   algorithm
     while not isEmpty(next) loop
-      nested_crefs := scalarize(next) :: nested_crefs;
+      nested_crefs := scalarize(next, resize) :: nested_crefs;
       CREF(restCref = next) := next;
     end while;
     crefs := scalarizeAll_Nesting(nested_crefs);
@@ -1732,12 +1820,14 @@ public
   function size
     input ComponentRef cref;
     input Boolean withComplex;
-    output Integer s = product(i for i in sizes(cref, withComplex));
+    input Boolean resize = false;
+    output Integer s = product(i for i in sizes(cref, withComplex, resize));
   end size;
 
   function sizes
     input ComponentRef cref;
     input Boolean withComplex;
+    input Boolean resize = false;
     input output list<Integer> s_lst = {};
   algorithm
     s_lst := match cref
@@ -1745,15 +1835,16 @@ public
         list<Integer> local_lst = {};
       case EMPTY() then listReverse(s_lst);
       case CREF() algorithm
-        local_lst := sizes_local(cref, withComplex);
+        local_lst := sizes_local(cref, withComplex, resize);
         s_lst := listAppend(local_lst, s_lst);
-      then sizes(cref.restCref, withComplex, s_lst);
+      then sizes(cref.restCref, withComplex, resize, s_lst);
     end match;
   end sizes;
 
   function sizes_local
     input ComponentRef cref;
     input Boolean withComplex;
+    input Boolean resize = false;
     output list<Integer> s_lst = {};
   protected
     Option<Integer> complex_size;
@@ -1762,7 +1853,7 @@ public
       case EMPTY() then {};
       case CREF() algorithm
         complex_size := Type.complexSize(cref.ty);
-        s_lst := list(Dimension.size(dim) for dim in Type.arrayDims(cref.ty));
+        s_lst := list(Dimension.size(dim, resize) for dim in Type.arrayDims(cref.ty));
         if withComplex and Util.isSome(complex_size) then
           s_lst := Util.getOption(complex_size) :: s_lst;
         end if;
@@ -2053,15 +2144,11 @@ public
     output Boolean b = firstName(cref) == "time";
   end isTime;
 
-  function isTopLevel
+  function isSubstitute
     input ComponentRef cref;
-    output Boolean b;
-  algorithm
-    b := match cref
-      case CREF(restCref = EMPTY()) then true;
-      else false;
-    end match;
-  end isTopLevel;
+    output Boolean b = firstName(cref) == "$SUBST_CREF";
+  end isSubstitute;
+
   /* ========================================
       Backend Extension functions
   ========================================= */
@@ -2281,9 +2368,10 @@ public
     input ComponentRef cref;
     output list<ComponentRef> children = {};
   protected
+    Type ty = Type.arrayElementType(getComponentType(cref));
     list<InstNode> children_nodes = {};
   algorithm
-    if Type.isComplex(getComponentType(cref)) then
+    if Type.isComplex(ty) then
       children_nodes := match cref
         case CREF() then arrayList(ClassTree.getComponents(Class.classTree(InstNode.getClass(Component.classInstance(InstNode.component(cref.node))))));
         else {};

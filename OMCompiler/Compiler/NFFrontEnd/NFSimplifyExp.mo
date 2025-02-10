@@ -132,17 +132,6 @@ algorithm
   end if;
 end simplify;
 
-function simplifyOpt
-  input output Option<Expression> exp;
-protected
-  Expression e;
-algorithm
-  exp := match exp
-    case SOME(e) then SOME(simplify(e));
-    else exp;
-  end match;
-end simplifyOpt;
-
 function simplifyRange
   input Expression range;
   output Expression exp;
@@ -154,7 +143,7 @@ algorithm
   Expression.RANGE(ty = ty, start = start_exp1, step = step_exp1, stop = stop_exp1) := range;
 
   start_exp2 := simplify(start_exp1);
-  step_exp2 := simplifyOpt(step_exp1);
+  step_exp2 := Util.applyOption(step_exp1, function simplify(includeScope = false));
   stop_exp2 := simplify(stop_exp1);
   ty2 := Type.simplify(ty);
 
@@ -164,8 +153,12 @@ algorithm
      referenceEq(ty, ty2) then
     exp := range;
   else
-    ty := TypeCheck.getRangeType(start_exp2, step_exp2, stop_exp2,
-      Type.arrayElementType(ty), AbsynUtil.dummyInfo);
+    if not Type.isResizable(ty) then
+      ty := TypeCheck.getRangeType(start_exp2, step_exp2, stop_exp2,
+        Type.arrayElementType(ty), AbsynUtil.dummyInfo);
+    else
+      ty := ty2;
+    end if;
     exp := Expression.RANGE(ty, start_exp2, step_exp2, stop_exp2);
   end if;
 end simplifyRange;
@@ -256,7 +249,8 @@ algorithm
   exp := match AbsynUtil.pathFirstIdent(name)
     case "cat"
       algorithm
-        exp := ExpandExp.expandBuiltinCat(args, call);
+        // ToDo: prevent this for NB
+        exp := ExpandExp.expandBuiltinCat(args, call, false);
       then
         exp;
 
@@ -1276,15 +1270,16 @@ function simplifyRelation
 protected
   Expression e1, e2, se1, se2;
   Operator op;
+  Integer index;
 algorithm
-  Expression.RELATION(e1, op, e2) := relationExp;
+  Expression.RELATION(e1, op, e2, index) := relationExp;
   se1 := simplify(e1);
   se2 := simplify(e2);
 
   if Expression.isLiteral(se1) and Expression.isLiteral(se2) then
     relationExp := Ceval.evalRelationOp(se1, op, se2);
   elseif not (referenceEq(e1, se1) and referenceEq(e2, se2)) then
-    relationExp := Expression.RELATION(se1, op, se2);
+    relationExp := Expression.RELATION(se1, op, se2, index);
   end if;
 end simplifyRelation;
 
@@ -1473,19 +1468,14 @@ algorithm
 end combineConstantNumbers;
 
 protected function getConstantValue
-  input Expression exp "REAL(), INTEGER(), CAST(), UNARY()";
+  input Expression exp;
   output Real value;
 algorithm
-  value := match exp
-    case Expression.REAL()                                                          then exp.value;
-    case Expression.INTEGER()                                                       then intReal(exp.value);
-    case Expression.CAST()                                                          then getConstantValue(exp.exp);
-    // negate r because it has a minus sign
-    case Expression.UNARY(operator = Operator.OPERATOR(op = NFOperator.Op.UMINUS))  then -getConstantValue(exp.exp);
-    else algorithm
-      Error.assertion(false, getInstanceName() + " expression is not known to be a constant number: " + Expression.toString(exp), sourceInfo());
-    then fail();
-  end match;
+  try
+    value := Expression.realValue(Ceval.evalExp(exp));
+  else
+    Error.addInternalError(getInstanceName() + " expression is not known to be a constant number: " + Expression.toString(exp), sourceInfo());
+  end try;
 end getConstantValue;
 
 public function combineBinaries

@@ -130,11 +130,15 @@ public function topLevelInput "author: PA
   input DAE.ConnectorType connectorType;
   input DAE.VarVisibility visibility = DAE.PUBLIC();
   output Boolean isTopLevel;
+protected
+  // the new frontend only keeps top level inputs, obsoleting bogus check for DAE.CREF_IDENT
+  Boolean newInst = Flags.isSet(Flags.SCODE_INST);
 algorithm
-  isTopLevel := match (varDirection, componentRef, visibility)
-    case (          _,                _, DAE.PROTECTED()) then false;
-    case (DAE.INPUT(), DAE.CREF_IDENT(),               _) then true;
-    case (DAE.INPUT(),                _,               _)
+  isTopLevel := match (varDirection, componentRef, visibility, newInst)
+    case (          _,                _, DAE.PROTECTED(),    _) then false;
+    case (DAE.INPUT(),                _,               _, true) then true;
+    case (DAE.INPUT(), DAE.CREF_IDENT(),               _,    _) then true;
+    case (DAE.INPUT(),                _,               _,    _)
       guard(ConnectUtil.faceEqual(ConnectUtil.componentFaceType(componentRef), Connect.OUTSIDE()))
       then topLevelConnectorType(connectorType);
     else false;
@@ -241,8 +245,27 @@ algorithm
   end match;
 end expTypeArrayDimensions;
 
+public function typeExp
+ "Converts a type to an expression, covering constants and parameters."
+  input DAE.Type tp;
+  output DAE.Exp exp;
+algorithm
+  exp := match tp
+    local
+      DAE.Dimension dim;
+      list<DAE.Dimension> rest;
+    case DAE.T_ARRAY(dims = dim :: rest) algorithm
+      exp := dimExp(dim);
+      for d in rest loop
+        exp := DAE.BINARY(exp, DAE.MUL(DAE.T_INTEGER_DEFAULT), dimExp(d));
+      end for;
+    then exp;
+    else DAE.ICONST(1);
+  end match;
+end typeExp;
+
 public function dimExp
- "Converts a dimension to an expression, covering constants and paramters."
+ "Converts a dimension to an expression, covering constants and parameters."
   input DAE.Dimension dim;
   output DAE.Exp exp;
 algorithm
@@ -6697,5 +6720,16 @@ algorithm
   end match;
 end getParameters;
 
+public function getInteger
+  input DAE.Exp exp;
+  output Integer i;
+algorithm
+  i := match exp
+    case DAE.ICONST(integer = i) then i;
+    else algorithm
+      Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because expression is not an ICONST: " + ExpressionDump.printExpStr(exp) + ".\n"});
+    then fail();
+  end match;
+end getInteger;
 annotation(__OpenModelica_Interface="frontend");
 end DAEUtil;

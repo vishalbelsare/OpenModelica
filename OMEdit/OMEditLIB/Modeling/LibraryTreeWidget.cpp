@@ -86,10 +86,9 @@ LibraryTreeItem::LibraryTreeItem(LibraryType type, QString text, QString nameStr
 {
   mIsRootItem = false;
   mpParentLibraryTreeItem = pParent;
-//  setPixmap(QPixmap());
-//  setDragPixmap(QPixmap());
   setName(text);
   setNameStructure(nameStructure);
+  setInternal(pParent->isInternal());
   setAccessAnnotations(false);
   setSaveContentsType(LibraryTreeItem::SaveInOneFile);
   if (type == LibraryTreeItem::Modelica) {
@@ -774,8 +773,7 @@ void LibraryTreeItem::tryToComplete(QList<CompleterItem> &completionClasses, QLi
   for (int bc = 0; bc < baseClasses.size(); ++bc) {
     QList<LibraryTreeItem*> classes = baseClasses[bc]->childrenItems();
     for (int i = 0; i < classes.size(); ++i) {
-      if (classes[i]->getName().startsWith(lastPart, Qt::CaseInsensitive) &&
-              classes[i]->getNameStructure().compare("OMEdit.Search.Feature") != 0)
+      if (classes[i]->getName().startsWith(lastPart, Qt::CaseInsensitive) && classes[i]->getNameStructure().compare(Helper::OMEditInternal) != 0)
         completionClasses << (CompleterItem(classes[i]->getName(), classes[i]->getHTMLDescription()));
     }
 
@@ -968,8 +966,8 @@ bool LibraryTreeProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex &s
     if (mShowOnlyModelica && !pLibraryTreeItem->isModelica()) {
       return false;
     }
-    // filter the dummy tree item "All" created for search functionality to be at the top
-    if (pLibraryTreeItem->getNameStructure().compare("OMEdit.Search.Feature") == 0) {
+    // filter the internal LibraryTreeItem
+    if (pLibraryTreeItem->isInternal()) {
       return false;
     }
 
@@ -1234,23 +1232,6 @@ LibraryTreeItem* LibraryTreeModel::findLibraryTreeItemOneLevel(const QString &na
 }
 
 /*!
- * \brief LibraryTreeModel::findNonExistingLibraryTreeItem
- * Finds the non existing LibraryTreeItem based on the name and case sensitivity.
- * \param name
- * \param caseSensitivity
- * \return
- */
-LibraryTreeItem* LibraryTreeModel::findNonExistingLibraryTreeItem(const QString &name, Qt::CaseSensitivity caseSensitivity) const
-{
-  foreach (LibraryTreeItem *pLibraryTreeItem, mNonExistingLibraryTreeItemsList) {
-    if (pLibraryTreeItem->getNameStructure().compare(name, caseSensitivity) == 0) {
-      return pLibraryTreeItem;
-    }
-  }
-  return 0;
-}
-
-/*!
  * \brief LibraryTreeModel::libraryTreeItemIndex
  * Finds the QModelIndex attached to LibraryTreeItem.
  * \param pLibraryTreeItem
@@ -1274,8 +1255,19 @@ void LibraryTreeModel::addModelicaLibraries(const QVector<QPair<QString, QString
   OMCProxy *pOMCProxy = MainWindow::instance()->getOMCProxy();
   pOMCProxy->loadSystemLibraries(libraries);
   QStringList systemLibs = pOMCProxy->getClassNames();
-  /*! @note OpenModelica is needed for the auto completion to work. Do not remove/move the following line. */
-  systemLibs.prepend("OpenModelica");
+
+  /*! @note OpenModelica is needed for the auto completion to work.
+   *  Create OpenModelica inside OMEditInternal. This allows loading OpenModelica if needed.
+   *  Do not remove/move the following code.
+   */
+  LibraryTreeItem *pLibraryTreeItem = findLibraryTreeItemOneLevel(Helper::OMEditInternal);
+  // reset name structure so nested OpenModelica gets correct name structure
+  pLibraryTreeItem->setNameStructure("");
+  pLibraryTreeItem->setInternal(true);
+  createLibraryTreeItem("OpenModelica", pLibraryTreeItem, true, true, true);
+  // restore name structure
+  pLibraryTreeItem->setNameStructure(Helper::OMEditInternal);
+
   foreach (QString systemLib, systemLibs) {
     LibraryTreeItem *pLibraryTreeItem = findLibraryTreeItem(systemLib);
     if (!pLibraryTreeItem) {
@@ -1301,8 +1293,6 @@ void LibraryTreeModel::addModelicaLibraries(const QVector<QPair<QString, QString
 LibraryTreeItem* LibraryTreeModel::createLibraryTreeItem(QString name, LibraryTreeItem *pParentLibraryTreeItem, bool isSaved,
                                                          bool isSystemLibrary, bool load, int row, bool loadingMOL)
 {
-  QString nameStructure = pParentLibraryTreeItem->getNameStructure().isEmpty() ? name : pParentLibraryTreeItem->getNameStructure() + "." + name;
-
   bool activateAccessAnnotations = false;
   QComboBox *pActivateAccessAnnotationsComboBox = OptionsDialog::instance()->getGeneralSettingsPage()->getActivateAccessAnnotationsComboBox();
   if (pActivateAccessAnnotationsComboBox->itemData(pActivateAccessAnnotationsComboBox->currentIndex()) == GeneralSettingsPage::Always
@@ -1310,14 +1300,12 @@ LibraryTreeItem* LibraryTreeModel::createLibraryTreeItem(QString name, LibraryTr
     activateAccessAnnotations = true;
   }
 
-  // check if is in non-existing classes.
-  LibraryTreeItem *pLibraryTreeItem = findNonExistingLibraryTreeItem(nameStructure);
   if (row == -1) {
     row = pParentLibraryTreeItem->childrenSize();
   }
   QModelIndex index = libraryTreeItemIndex(pParentLibraryTreeItem);
   beginInsertRows(index, row, row);
-  pLibraryTreeItem = createLibraryTreeItemImpl(name, pParentLibraryTreeItem, isSaved, isSystemLibrary, load, row, activateAccessAnnotations);
+  LibraryTreeItem *pLibraryTreeItem = createLibraryTreeItemImpl(name, pParentLibraryTreeItem, isSaved, isSystemLibrary, load, row, activateAccessAnnotations);
   endInsertRows();
   return pLibraryTreeItem;
 }
@@ -1736,6 +1724,11 @@ bool LibraryTreeModel::unloadClass(LibraryTreeItem *pLibraryTreeItem, bool askQu
  */
 bool LibraryTreeModel::reloadClass(LibraryTreeItem *pLibraryTreeItem, bool askQuestion)
 {
+  // Makesure we save before doing reload
+  if (!mpLibraryWidget->saveLibraryTreeItem(pLibraryTreeItem)) {
+    return false;
+  }
+
   if (askQuestion) {
     QMessageBox *pMessageBox = new QMessageBox(MainWindow::instance());
     pMessageBox->setWindowTitle(QString("%1 - %2").arg(Helper::applicationName, Helper::question));
@@ -2457,9 +2450,7 @@ LibraryTreeItem* LibraryTreeModel::createLibraryTreeItemImpl(QString name, Libra
                                                              bool isSystemLibrary, bool load, int row, bool activateAccessAnnotations)
 {
   QString nameStructure = pParentLibraryTreeItem->getNameStructure().isEmpty() ? name : pParentLibraryTreeItem->getNameStructure() + "." + name;
-  // check if is in non-existing classes.
-  LibraryTreeItem *pLibraryTreeItem = findNonExistingLibraryTreeItem(nameStructure);
-  pLibraryTreeItem = new LibraryTreeItem(LibraryTreeItem::Modelica, name, nameStructure, "", isSaved, pParentLibraryTreeItem);
+  LibraryTreeItem *pLibraryTreeItem = new LibraryTreeItem(LibraryTreeItem::Modelica, name, nameStructure, "", isSaved, pParentLibraryTreeItem);
   pLibraryTreeItem->setSystemLibrary(pParentLibraryTreeItem == mpRootLibraryTreeItem ? isSystemLibrary : pParentLibraryTreeItem->isSystemLibrary());
   pLibraryTreeItem->setAccessAnnotations(activateAccessAnnotations);
   if (row == -1) {
@@ -2639,12 +2630,13 @@ void LibraryTreeModel::createOMSTLMBusConnectorLibraryTreeItems(LibraryTreeItem 
 void unloadHelper(LibraryTreeItem *pLibraryTreeItem)
 {
   MainWindow *pMainWindow = MainWindow::instance();
+  pMainWindow->getDocumentationWidget()->updateDocumentationHistory(pLibraryTreeItem);
   /* close the ModelWidget of LibraryTreeItem. */
   if (pLibraryTreeItem->getModelWidget()) {
     // if ModelWidget is used by DiagramWindow
-    if (MainWindow::instance()->getPlotWindowContainer()->getDiagramSubWindowFromMdi()
-        && MainWindow::instance()->getPlotWindowContainer()->getDiagramWindow()->getModelWidget() == pLibraryTreeItem->getModelWidget()) {
-      MainWindow::instance()->getPlotWindowContainer()->getDiagramWindow()->removeVisualizationDiagram();
+    if (pMainWindow->getPlotWindowContainer()->getDiagramSubWindowFromMdi()
+        && pMainWindow->getPlotWindowContainer()->getDiagramWindow()->getModelWidget() == pLibraryTreeItem->getModelWidget()) {
+      pMainWindow->getPlotWindowContainer()->getDiagramWindow()->removeVisualizationDiagram();
     }
     QMdiSubWindow *pMdiSubWindow = pMainWindow->getModelWidgetContainer()->getMdiSubWindow(pLibraryTreeItem->getModelWidget());
     if (pMdiSubWindow) {
@@ -3178,7 +3170,7 @@ void LibraryTreeView::showContextMenu(QPoint point)
           if (pLibraryTreeItem->getRestriction() == StringHandler::ModelicaClasses::Function) {
             menu.addAction(mpCallFunctionAction);
           }
-          /* If item is OpenModelica or part of it then don't show the duplicate and unload/delete menu item for it. */
+          /* If item is OpenModelica or part of it then don't show the duplicate menu item for it. */
           if (!(StringHandler::getFirstWordBeforeDot(pLibraryTreeItem->getNameStructure()).compare("OpenModelica") == 0)) {
             menu.addSeparator();
             menu.addAction(mpDuplicateClassAction);
@@ -3189,26 +3181,26 @@ void LibraryTreeView::showContextMenu(QPoint point)
             } else {
               mpDuplicateClassAction->setEnabled(false);
             }
-            /* Add unload/delete menu item for top level libraries
-             * Add reload menu item for top level non system libraries
-             * Add unload/delete menu item for non top level and non system libraries
-             */
-            if (pLibraryTreeItem->isTopLevel()) {
-              mpUnloadClassAction->setText(Helper::unloadClass);
-              mpUnloadClassAction->setStatusTip(Helper::unloadClassTip);
-              menu.addAction(mpUnloadClassAction);
-              if (!pLibraryTreeItem->isSystemLibrary()) {
-                menu.addAction(mpReloadClassAction);
-              }
-            } else {
-              if (!pLibraryTreeItem->isSystemLibrary()) {
-                mpUnloadClassAction->setText(Helper::deleteStr);
-                mpUnloadClassAction->setStatusTip(tr("Deletes the Modelica class"));
-                menu.addAction(mpUnloadClassAction);
-              }
-            }
-            menu.addSeparator();
           }
+          /* Add unload/delete menu item for top level libraries
+           * Add reload menu item for top level non system libraries
+           * Add unload/delete menu item for non top level and non system libraries
+           */
+          if (pLibraryTreeItem->isTopLevel()) {
+            mpUnloadClassAction->setText(Helper::unloadClass);
+            mpUnloadClassAction->setStatusTip(Helper::unloadClassTip);
+            menu.addAction(mpUnloadClassAction);
+            if (!pLibraryTreeItem->isSystemLibrary()) {
+              menu.addAction(mpReloadClassAction);
+            }
+          } else {
+            if (!pLibraryTreeItem->isSystemLibrary()) {
+              mpUnloadClassAction->setText(Helper::deleteStr);
+              mpUnloadClassAction->setStatusTip(tr("Deletes the Modelica class"));
+              menu.addAction(mpUnloadClassAction);
+            }
+          }
+          menu.addSeparator();
           // add actions to Export menu
           exportMenu.addAction(mpExportFMUAction);
           if (pLibraryTreeItem->isTopLevel() && pLibraryTreeItem->getRestriction() == StringHandler::Package
@@ -3728,8 +3720,11 @@ void LibraryTreeView::convertClassUsesLibraries()
 {
   LibraryTreeItem *pLibraryTreeItem = getSelectedLibraryTreeItem();
   if (pLibraryTreeItem) {
-    ConvertClassUsesAnnotationDialog *pConvertClassUsesAnnotationDialog = new ConvertClassUsesAnnotationDialog(pLibraryTreeItem);
-    pConvertClassUsesAnnotationDialog->exec();
+    // Makesure we save before calling conversions
+    if (mpLibraryWidget->saveLibraryTreeItem(pLibraryTreeItem)) {
+      ConvertClassUsesAnnotationDialog *pConvertClassUsesAnnotationDialog = new ConvertClassUsesAnnotationDialog(pLibraryTreeItem);
+      pConvertClassUsesAnnotationDialog->exec();
+    }
   }
 }
 
@@ -3897,10 +3892,8 @@ void LibraryTreeView::keyPressEvent(QKeyEvent *event)
       copyClassPathHelper(pLibraryTreeItem->getNameStructure());
     } else if (event->key() == Qt::Key_Delete) {
       if (isModelicaLibraryType) {
-        // If item is OpenModelica or part of it then don't unload it.
         // If item is system library and not a toplevel then don't unload it.
-        if (!(StringHandler::getFirstWordBeforeDot(pLibraryTreeItem->getNameStructure()).compare("OpenModelica") == 0)
-            && (!isSystemLibrary || (isSystemLibrary && isTopLevel))) {
+        if (!isSystemLibrary || (isSystemLibrary && isTopLevel)) {
           unloadClass();
         }
       } else if (isTopLevel && isOMSimulatorLibraryType) {
@@ -3970,8 +3963,8 @@ LibraryWidget::LibraryWidget(QWidget *pParent)
   mpTreeSearchFilters->getExpandAllButton()->setEnabled(false);
   mpTreeSearchFilters->getExpandAllButton()->setToolTip(tr("Expanding the Library Browser is a time consuming and non-responsive operation so this button is disabled intentionally."));
   connect(mpTreeSearchFilters->getCollapseAllButton(), SIGNAL(clicked()), mpLibraryTreeView, SLOT(collapseAll()));
-  // create a dummy librarytreeItem
-  mpLibraryTreeModel->createLibraryTreeItem(LibraryTreeItem::Text, "All", "OMEdit.Search.Feature", "", true, mpLibraryTreeModel->getRootLibraryTreeItem());
+  // create a LibraryTreeItem for internal usage e.g., annotation auto complete and search scope.
+  mpLibraryTreeModel->createLibraryTreeItem(LibraryTreeItem::Text, "All", Helper::OMEditInternal, "", true, mpLibraryTreeModel->getRootLibraryTreeItem());
   // create the layout
   QGridLayout *pMainLayout = new QGridLayout;
   pMainLayout->setContentsMargins(0, 0, 0, 0);

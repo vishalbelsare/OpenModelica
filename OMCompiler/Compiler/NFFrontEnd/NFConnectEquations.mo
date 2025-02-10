@@ -320,10 +320,10 @@ algorithm
     // somewhat valid we use 'abs(lhs - rhs) <= 0' instead.
     exp := Expression.BINARY(lhs_exp, Operator.makeSub(elem_ty), rhs_exp);
     exp := Expression.CALL(Call.makeTypedCall(NFBuiltinFuncs.ABS_REAL, {exp}, Expression.variability(exp), Purity.PURE));
-    exp := Expression.RELATION(exp, Operator.makeLessEq(elem_ty), Expression.REAL(0.0));
+    exp := Expression.RELATION(exp, Operator.makeLessEq(elem_ty), Expression.REAL(0.0), -1);
   else
     // For any other type, generate assertion for 'lhs == rhs'.
-    exp := Expression.RELATION(lhs_exp, Operator.makeEqual(elem_ty), rhs_exp);
+    exp := Expression.RELATION(lhs_exp, Operator.makeEqual(elem_ty), rhs_exp, -1);
   end if;
 
   equalityAssert := Equation.ASSERT(exp, EQ_ASSERT_STR, NFBuiltin.ASSERTIONLEVEL_ERROR, InstNode.EMPTY_NODE(), source);
@@ -1006,7 +1006,7 @@ algorithm
 
     exp := Expression.IF(
       Type.REAL(),
-      Expression.RELATION(flow_exp, op, Expression.REAL(0.0)),
+      Expression.RELATION(flow_exp, op, Expression.REAL(0.0), -1),
       instream_exp, stream_exp);
   end if;
 end evaluateActualStream;
@@ -1046,9 +1046,9 @@ protected
   Real min_val, max_val;
 algorithm
   omin := lookupVarAttr(flowCref, "min", variables);
-  omin := SimplifyExp.simplifyOpt(omin);
+  omin := Util.applyOption(omin, function SimplifyExp.simplify(includeScope = false));
   omax := lookupVarAttr(flowCref, "max", variables);
-  omax := SimplifyExp.simplifyOpt(omax);
+  omax := Util.applyOption(omax, function SimplifyExp.simplify(includeScope = false));
 
   direction := match (omin, omax)
     // No attributes, flow direction can't be decided.

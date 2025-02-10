@@ -142,7 +142,7 @@ const char *OMC_LOG_STREAM_DESC[OMC_SIM_LOG_MAX] = {
   "logging of homotopy solver for nonlinear systems",                           /* OMC_LOG_NLS_HOMOTOPY */
   "outputs the jacobian of nonlinear systems",                                  /* OMC_LOG_NLS_JAC */
   "tests the analytical jacobian of nonlinear systems",                         /* OMC_LOG_NLS_JAC_TEST */
-  "Log Newton diagnostics",                                                     /* OMC_LOG_NLS_NEWTON_DIAGNOSTICS */
+  "newton diagnostics (see: https://doi.org/10.1016/j.amc.2021.125991)",        /* OMC_LOG_NLS_NEWTON_DIAGNOSTICS */
   "outputs every evaluation of the residual function",                          /* OMC_LOG_NLS_RES */
   "outputs debug information about extrapolate process",                        /* OMC_LOG_NLS_EXTRAPOLATE */
   "outputs residuals of the initialization",                                    /* OMC_LOG_RES_INIT */
@@ -208,7 +208,7 @@ void deactivateLogging()
 
   if (streamsActive == 0)
   {
-    return;   /* Do nothing if allready actinactiveive */
+    return;   /* Do nothing if already inactive */
   }
 
   for(i=0; i<OMC_SIM_LOG_MAX; ++i)
@@ -240,7 +240,7 @@ void reactivateLogging()
 
   if (streamsActive == 1)
   {
-    return;   /* Do nothing if allready active */
+    return;   /* Do nothing if already active */
   }
 
   for(i=0; i<OMC_SIM_LOG_MAX; ++i)

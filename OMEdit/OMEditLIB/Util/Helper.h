@@ -52,10 +52,11 @@ public:
   static QString organization;
   static QString application;
   static QString OpenModelicaVersion;
-  static QString OpenModelicaUsersGuideVersion;
   static QString OpenModelicaHome;
   static QString ModelicaPath;
   static QString userHomeDirectory;
+  static QString OpenModelicaUsersGuideVersion;
+  static QString OMEditInternal;
   static QString OMCServerName;
   static QString omFileTypes;
   static QString omEncryptedFileTypes;
@@ -130,10 +131,14 @@ public:
   static QString BOOLEAN;
   static QString INTEGER;
   static QString REAL;
+  static QString BREAK;
   /* OMSimulator system types */
   static QString systemTLM;
   static QString systemWC;
   static QString systemSC;
+  static QString displayLimit;
+  static QString displayLimitMsg;
+  static QString arrayIndexRegularExpression;
   /* Global translated variables */
   static QString newModelicaClass;
   static QString newModelicaClassLibraryBrowser;

@@ -125,7 +125,8 @@ public
 
   function size
     input Variable var;
-    output Integer s = Type.sizeOf(var.ty);
+    input Boolean resize = false;
+    output Integer s = Type.sizeOf(var.ty, resize);
   end size;
 
   function hash
@@ -210,20 +211,19 @@ public
     "Expands a variable into itself and its children if its complex."
     input Variable var;
     input list<Dimension> arrayDims = {};
+    input Boolean addDimensions = true;
     output list<Variable> children;
   protected
     list<Dimension> newArrayDims;
   algorithm
     // add dimensions of surrounding record
-    if not listEmpty(arrayDims) then
+    if addDimensions and not listEmpty(arrayDims) then
       var.ty := Type.liftArrayLeftList(var.ty, arrayDims);
     end if;
     newArrayDims := Type.arrayDims(var.ty);
 
-    // for non-complex variables the children are empty therefore it will be returned itself
-    var.children := List.flatten(list(expandChildren(v, newArrayDims) for v in var.children));
     // return all children and the variable itself
-    children := var :: var.children;
+    children := var :: List.flatten(list(expandChildren(v, newArrayDims, addDimensions) for v in var.children));
   end expandChildren;
 
   function typeOf
@@ -304,7 +304,7 @@ public
 
   function isTopLevelInput
     input Variable variable;
-    output Boolean topInput = ComponentRef.isSimple(variable.name) and
+    output Boolean topInput = ComponentRef.isTopLevel(variable.name) and
                               variable.attributes.direction == Direction.INPUT;
   end isTopLevelInput;
 
@@ -379,6 +379,17 @@ public
 
     binding := NFBinding.EMPTY_BINDING;
   end lookupTypeAttribute;
+
+  function applyToType
+    input output Variable var;
+    input typeFunc func;
+    partial function typeFunc
+      input output Type ty;
+    end typeFunc;
+  algorithm
+    var.ty := func(var.ty);
+    var.name := ComponentRef.applyToType(var.name, func);
+  end applyToType;
 
   function propagateAnnotation
     input String name;

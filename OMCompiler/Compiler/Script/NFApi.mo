@@ -45,6 +45,7 @@ import NFComponent.Component;
 import ComponentRef = NFComponentRef;
 import Dimension = NFDimension;
 import Expression = NFExpression;
+import Import = NFImport;
 import NFClass.Class;
 import NFInstNode.InstNode;
 import NFInstNode.InstNodeType;
@@ -210,7 +211,7 @@ algorithm
           // Instantiate expressions (i.e. anything that can contains crefs, like
           // bindings, dimensions, etc). This is done as a separate step after
           // instantiation to make sure that lookup is able to find the correct nodes.
-          NFInst.instExpressions(inst_anncls, context = ANNOTATION_CONTEXT);
+          NFInst.instExpressions(inst_anncls, context = ANNOTATION_CONTEXT, settings = NFInst.DEFAULT_SETTINGS);
 
           // Mark structural parameters.
           NFInst.updateImplicitVariability(inst_anncls, Flags.isSet(Flags.EVAL_PARAM), ANNOTATION_CONTEXT);
@@ -251,7 +252,7 @@ algorithm
           // Instantiate expressions (i.e. anything that can contains crefs, like
           // bindings, dimensions, etc). This is done as a separate step after
           // instantiation to make sure that lookup is able to find the correct nodes.
-          NFInst.instExpressions(inst_anncls, context = ANNOTATION_CONTEXT);
+          NFInst.instExpressions(inst_anncls, context = ANNOTATION_CONTEXT, settings = NFInst.DEFAULT_SETTINGS);
 
           // Mark structural parameters.
           NFInst.updateImplicitVariability(inst_anncls, Flags.isSet(Flags.EVAL_PARAM), ANNOTATION_CONTEXT);
@@ -578,7 +579,7 @@ algorithm
   // Instantiate expressions (i.e. anything that can contains crefs, like
   // bindings, dimensions, etc). This is done as a separate step after
   // instantiation to make sure that lookup is able to find the correct nodes.
-  NFInst.instExpressions(inst_cls, context = NFInstContext.RELAXED);
+  NFInst.instExpressions(inst_cls, context = NFInstContext.RELAXED, settings = NFInst.DEFAULT_SETTINGS);
 
   // Mark structural parameters.
   NFInst.updateImplicitVariability(inst_cls, Flags.isSet(Flags.EVAL_PARAM), NFInstContext.RELAXED);
@@ -791,7 +792,7 @@ protected
 algorithm
   context := InstContext.set(NFInstContext.RELAXED, NFInstContext.CLASS);
   context := InstContext.set(context, NFInstContext.INSTANCE_API);
-  inst_settings := InstSettings.SETTINGS(mergeExtendsSections = false);
+  inst_settings := InstSettings.SETTINGS(mergeExtendsSections = false, resizableArrays = false);
 
   (_, top) := mkTop(SymbolTable.getAbsyn(), AbsynUtil.pathString(classPath));
   mod := parseModifier(modifier, top);
@@ -1037,6 +1038,7 @@ algorithm
   json := JSON.addPairNotNull("elements", dumpJSONElements(elems, node, isDeleted), json);
 
   if not isDeleted then
+    json := dumpJSONImports(node, json);
     sections := Class.getSections(InstNode.getClass(node));
     json := dumpJSONEquations(sections, node, json);
   end if;
@@ -1105,7 +1107,7 @@ algorithm
       scope := InstNode.setNodeType(InstNodeType.ROOT_CLASS(InstNode.EMPTY_NODE()), scope);
       scope := Inst.instantiate(scope, context = context, instPartial = true);
       Inst.insertGeneratedInners(scope, InstNode.topScope(scope), context);
-      Inst.instExpressions(scope, context = context);
+      Inst.instExpressions(scope, context = context, settings = NFInst.DEFAULT_SETTINGS);
     else
     end try;
     ErrorExt.rollBack(getInstanceName());
@@ -1286,7 +1288,7 @@ algorithm
         ();
 
     case (Component.COMPONENT(), SCode.Element.COMPONENT())
-algorithm
+      algorithm
         json := JSON.addPair("$kind", JSON.makeString("component"), json);
         json := JSON.addPair("name", JSON.makeString(InstNode.name(node)), json);
         json := JSON.addPair("type", dumpJSONComponentType(cls, node, comp.ty), json);
@@ -1723,6 +1725,12 @@ algorithm
       then
         ();
 
+    case (_, SCode.Mod.NOMOD())
+      algorithm
+        json := JSON.addPair(name, JSON.emptyObject(), json);
+      then
+        ();
+
     else ();
   end match;
 end dumpJSONAnnotationSubMod;
@@ -1879,6 +1887,50 @@ algorithm
     else ();
   end match;
 end dumpJSONAbsynFunctionArgs;
+
+function dumpJSONImports
+  input InstNode node;
+  input output JSON json;
+protected
+  InstNode n = node;
+  array<Import> imps;
+  list<Import> resolved_imps;
+  JSON json_imp, json_imp_array;
+algorithm
+  json_imp_array := JSON.makeNull();
+
+  while not InstNode.isEmpty(n) loop
+    imps := ClassTree.getImports(Class.classTree(InstNode.getClass(n)));
+
+    if not arrayEmpty(imps) then
+      resolved_imps := Import.resolveList(imps);
+      resolved_imps := listReverseInPlace(resolved_imps);
+
+      for imp in resolved_imps loop
+        () := match imp
+          case Import.RESOLVED_IMPORT()
+            algorithm
+              json_imp := JSON.makeNull();
+              json_imp := JSON.addPair("path", dumpJSONPath(InstNode.fullPath(imp.node)), json_imp);
+
+              if not stringEmpty(imp.shortName) then
+                json_imp := JSON.addPair("shortName", JSON.makeString(imp.shortName), json_imp);
+              end if;
+
+              json_imp_array := JSON.addElement(json_imp, json_imp_array);
+            then
+              ();
+
+          else ();
+        end match;
+      end for;
+    end if;
+
+    n := InstNode.parent(n);
+  end while;
+
+  json := JSON.addPairNotNull("imports", json_imp_array, json);
+end dumpJSONImports;
 
 function dumpJSONEquations
   input Sections sections;

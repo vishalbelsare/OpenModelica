@@ -42,10 +42,11 @@ QString Helper::organization = "openmodelica";  /* case-sensitive string. Don't 
 QString Helper::application = "omedit"; /* case-sensitive string. Don't change it. Used by ini settings file. */
 // Following four variables are set once we are connected to OMC......in OMCProxy::initializeOMC().
 QString Helper::OpenModelicaVersion = "";
-QString Helper::OpenModelicaUsersGuideVersion = "latest";
 QString Helper::OpenModelicaHome = "";
 QString Helper::ModelicaPath = "";
 QString Helper::userHomeDirectory = "";
+QString Helper::OpenModelicaUsersGuideVersion = "latest";
+QString Helper::OMEditInternal = "OMEditInternal";
 QString Helper::OMCServerName = "OMEdit";
 QString Helper::omFileTypes = "All Files (*.mo *.mol *.bmo *.mos *.ssp *.crml);;Modelica Files (*.mo);;Encrypted Modelica Libraries (*.mol);;Base Modelica Files (*.bmo)"
                               ";;Modelica Script Files (*.mos);;System Structure and Parameterization Files (*.ssp);;CRML Files (*.crml)";
@@ -124,10 +125,14 @@ QString Helper::STRING = QString("String");
 QString Helper::BOOLEAN = QString("Boolean");
 QString Helper::INTEGER = QString("Integer");
 QString Helper::REAL = QString("Real");
+QString Helper::BREAK = QString("break");
 /* OMSimulator system types */
 QString Helper::systemTLM = QString("TLM - Transmission Line Modeling System");
 QString Helper::systemWC = QString("Weakly Coupled - Connected Co-Simulation FMUs System");
 QString Helper::systemSC = QString("Strongly Coupled - Connected Model-Exchange FMUs System");
+QString Helper::displayLimit = QString("Reached display limit");
+QString Helper::displayLimitMsg = QString("Reached display limit. To read the full log open the file <a href=\"file:///%1\">%1</a>");
+QString Helper::arrayIndexRegularExpression = QString(R"(\[(\d+)(?:,(\d+))?\])");
 /* Global translated variables */
 QString Helper::newModelicaClass;
 QString Helper::newModelicaClassLibraryBrowser;

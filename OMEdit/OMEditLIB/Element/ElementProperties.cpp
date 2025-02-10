@@ -65,18 +65,25 @@ FinalEachToolButton::FinalEachToolButton(bool canHaveEach, QWidget *parent)
 {
   setIcon(QIcon(":/Resources/icons/drop-menu.svg"));
   setAutoRaise(true);
-  // create a menu
-  mpFinalEachMenu = new QMenu;
   // final action
   mpFinalAction = new QAction("final");
   mpFinalAction->setCheckable(true);
-  mpFinalEachMenu->addAction(mpFinalAction);
   // each action
   mpEachAction = new QAction("each");
   mpEachAction->setCheckable(true);
+  // break action
+  mpBreakAction = new QAction(Helper::BREAK);
+  mpBreakAction->setCheckable(true);
+  connect(mpBreakAction, SIGNAL(toggled(bool)), SIGNAL(breakToggled(bool)));
+  // create a menu
+  mpFinalEachMenu = new QMenu;
+  mpFinalEachMenu->addAction(mpFinalAction);
   if (canHaveEach) {
     mpFinalEachMenu->addAction(mpEachAction);
   }
+  mpFinalEachMenu->addSeparator();
+  mpFinalEachMenu->addAction(mpBreakAction);
+
   connect(this, SIGNAL(clicked()), SLOT(showParameterMenu()));
 }
 
@@ -92,13 +99,21 @@ void FinalEachToolButton::setEach(bool each)
   mEachDefault = each;
 }
 
+void FinalEachToolButton::setBreak(bool break_)
+{
+  bool state = mpBreakAction->blockSignals(true);
+  mpBreakAction->setChecked(break_);
+  mpBreakAction->blockSignals(state);
+  mBreakDefault = break_;
+}
+
 /*!
  * \brief FinalEachToolButton::isModified
- * \return true if final or each are modified.
+ * \return true if final or each or break are modified.
  */
 bool FinalEachToolButton::isModified() const
 {
-  if (mFinalDefault != isFinal() || mEachDefault != isEach()) {
+  if (mFinalDefault != isFinal() || mEachDefault != isEach() || mBreakDefault != isBreak()) {
     return true;
   } else {
     return false;
@@ -191,6 +206,7 @@ Parameter::Parameter(ModelInstance::Element *pElement, bool defaultValue, Elemen
   }
   // final and each menu
   mpFinalEachMenuButton = new FinalEachToolButton(mpElementParameters->hasElement() && mpElementParameters->isElementArray());
+  connect(mpFinalEachMenuButton, SIGNAL(breakToggled(bool)), SLOT(setBreakValue(bool)));
   mValueCheckBoxModified = false;
   mDefaultValue = "";
   mpFileSelectorButton = new QToolButton;
@@ -726,6 +742,7 @@ void Parameter::createValueWidget()
  */
 void Parameter::enableDisableUnitComboBox(const QString &value)
 {
+  mpFinalEachMenuButton->setBreak(value.compare(Helper::BREAK) == 0);
   // Do not do anything when the value is empty
   if (value.isEmpty()) {
     return;
@@ -796,6 +813,17 @@ void Parameter::resetUnitCombobox()
 }
 
 /*!
+ * \brief Parameter::setBreakValue
+ * Slot activated when break is toggled in the menu.
+ * \param breakValue
+ */
+void Parameter::setBreakValue(bool breakValue)
+{
+  const QString breakStr = breakValue ? Helper::BREAK : "";
+  setValueWidget(breakStr, false, mUnit, true);
+}
+
+/*!
  * \brief Parameter::editClassButtonClicked
  * Slot activate when mpEditClassButton clicked signal is raised.
  * Opens ElementParameters dialog for the redeclare class.
@@ -835,21 +863,15 @@ void Parameter::editClassButtonClicked()
     }
   }
 
+  // if we fail to find the type
   if ((mpModelInstanceElement == NULL) ||
       (mpModelInstanceElement->getTopLevelExtendElement() == NULL) ||
       (mpModelInstanceElement->getTopLevelExtendElement()->getParentModel() == NULL) ||
-      (mpModelInstanceElement->getTopLevelExtendElement()->getParentModel()->getName() == QString()))
-  {
-    QMessageBox::critical(MainWindow::instance(), QString("%1 - %2").arg(Helper::applicationName, Helper::error),
-                          tr("Unable to find the redeclare class."), QMessageBox::Ok);
-  }
-  // get type as qualified path
-  const QString qualifiedType = MainWindow::instance()->getOMCProxy()->qualifyPath(mpModelInstanceElement->getTopLevelExtendElement()->getParentModel()->getName(), type);
-  // if we fail to find the type
-  if (qualifiedType.isEmpty()) {
-    QMessageBox::critical(MainWindow::instance(), QString("%1 - %2").arg(Helper::applicationName, Helper::error),
-                          tr("Unable to find the redeclare class."), QMessageBox::Ok);
+      (mpModelInstanceElement->getTopLevelExtendElement()->getParentModel()->getName() == QString())) {
+    QMessageBox::critical(MainWindow::instance(), QString("%1 - %2").arg(Helper::applicationName, Helper::error), tr("Unable to find the redeclare class."), QMessageBox::Ok);
   } else {
+    // get type as qualified path
+    const QString qualifiedType = MainWindow::instance()->getOMCProxy()->qualifyPath(mpModelInstanceElement->getTopLevelExtendElement()->getParentModel()->getName(), type);
     ModelInstance::Model *pCurrentModel = mpModelInstanceElement->getModel();
     const QJsonObject newModelJSON = MainWindow::instance()->getOMCProxy()->getModelInstance(qualifiedType, modifier);
     if (!newModelJSON.isEmpty()) {
@@ -1312,13 +1334,18 @@ void ElementParameters::applyFinalStartFixedAndDisplayUnitModifiers(Parameter *p
               pParameter->setValueWidget(StringHandler::removeFirstLastQuotes(pStartModifier->getValue()), defaultValue, pParameter->getUnit(), mNested);
               pParameter->getFinalEachMenu()->setFinal(pStartModifier->isFinal());
               pParameter->getFinalEachMenu()->setEach(pStartModifier->isEach());
+              pParameter->getFinalEachMenu()->setBreak(pStartModifier->isBreak());
             }
           }
           if (hasFixed) {
             ModelInstance::Modifier *pFixedModifier = pModifier->getModifier("fixed");
             if (pFixedModifier) {
               isFixedFinal = pFixedModifier->isFinal();
-              pParameter->setFixedState(StringHandler::removeFirstLastQuotes(pFixedModifier->getValue()), defaultValue);
+              if (pFixedModifier->isBreak()) {
+                pParameter->getFixedFinalEachMenu()->setBreak(pFixedModifier->isBreak());
+              } else {
+                pParameter->setFixedState(StringHandler::removeFirstLastQuotes(pFixedModifier->getValue()), defaultValue);
+              }
               pParameter->getFixedFinalEachMenu()->setFinal(pFixedModifier->isFinal());
               pParameter->getFixedFinalEachMenu()->setEach(pFixedModifier->isEach());
             }
@@ -1354,6 +1381,7 @@ void ElementParameters::applyFinalStartFixedAndDisplayUnitModifiers(Parameter *p
           // set final and each checkboxes in the menu
           pParameter->getFinalEachMenu()->setFinal(pModifier->isFinal());
           pParameter->getFinalEachMenu()->setEach(pModifier->isEach());
+          pParameter->getFinalEachMenu()->setBreak(pModifier->isBreak());
         }
       } else { // if not builtin type then use all sub modifiers
         QString modifierValue;
@@ -1376,14 +1404,17 @@ void ElementParameters::applyFinalStartFixedAndDisplayUnitModifiers(Parameter *p
       if (!displayUnit.isEmpty()) {
         int index = pParameter->getUnitComboBox()->findData(displayUnit);
         if (index < 0) {
-          // add modifier as additional display unit if compatible
-          OMCProxy *pOMCProxy = MainWindow::instance()->getOMCProxy();
-          if (pParameter->getUnitComboBox()->count() > 0 && pOMCProxy->convertUnits(pParameter->getUnitComboBox()->itemData(0).toString(), displayUnit).unitsCompatible) {
-            pParameter->getUnitComboBox()->addItem(Utilities::convertUnitToSymbol(displayUnit), displayUnit);
-            index = pParameter->getUnitComboBox()->count() - 1;
+          if (pDisplayUnitModifier && displayUnit.compare(Helper::BREAK) == 0) {
+            pParameter->getDisplayUnitFinalEachMenu()->setBreak(pDisplayUnitModifier->isBreak());
+          } else {
+            // add modifier as additional display unit if compatible
+            OMCProxy *pOMCProxy = MainWindow::instance()->getOMCProxy();
+            if (pParameter->getUnitComboBox()->count() > 0 && pOMCProxy->convertUnits(pParameter->getUnitComboBox()->itemData(0).toString(), displayUnit).unitsCompatible) {
+              pParameter->getUnitComboBox()->addItem(Utilities::convertUnitToSymbol(displayUnit), displayUnit);
+              index = pParameter->getUnitComboBox()->count() - 1;
+            }
           }
-        }
-        if (index > -1) {
+        } else {
           /* Issue #11782.
            * Setting the display unit trigger SIGNAL currentIndexChanged and calls SLOT unitComboBoxChanged which will set the correct value.
            */
@@ -1793,6 +1824,7 @@ void ElementParameters::applyModifier(ModelInstance::Modifier *pModifier, bool d
       if (pParameter && !pParameter->isShowStartAndFixed()) {
         pParameter->getFinalEachMenu()->setFinal(pSubModifier->isFinal());
         pParameter->getFinalEachMenu()->setEach(pSubModifier->isEach());
+        pParameter->getFinalEachMenu()->setBreak(pSubModifier->isBreak());
       }
     }
   }
@@ -1842,6 +1874,7 @@ typedef struct {
   bool mIsReplaceable;
   bool mFinal;
   bool mEach;
+  bool mBreak;
   bool mStartAndFixed;
 } ElementModifier;
 
@@ -1909,20 +1942,30 @@ void ElementParameters::updateElementParameters()
     elementModifier.mIsReplaceable = (pParameter->isReplaceableComponent() || pParameter->isReplaceableClass());
     elementModifier.mFinal = pParameter->getFinalEachMenu()->isFinal();
     elementModifier.mEach = pParameter->getFinalEachMenu()->isEach();
+    elementModifier.mBreak = pParameter->getFinalEachMenu()->isBreak();
     elementModifier.mStartAndFixed = pParameter->isShowStartAndFixed();
-    // convert the value to display unit
-    if (!pParameter->getUnit().isEmpty() && pParameter->getUnit().compare(pParameter->getUnitComboBox()->itemData(pParameter->getUnitComboBox()->currentIndex()).toString()) != 0) {
-      bool ok = true;
-      qreal elementModifierRealValue = elementModifierValue.toDouble(&ok);
-      // if the modifier is a literal constant
-      if (ok) {
-        OMCInterface::convertUnits_res convertUnit = pOMCProxy->convertUnits(pParameter->getUnitComboBox()->itemData(pParameter->getUnitComboBox()->currentIndex()).toString(), pParameter->getUnit());
-        if (convertUnit.unitsCompatible) {
-          elementModifierRealValue = Utilities::convertUnit(elementModifierRealValue, convertUnit.offset, convertUnit.scaleFactor);
-          elementModifierValue = StringHandler::number(elementModifierRealValue);
+    // if break
+    if (elementModifier.mBreak) {
+      elementModifierValue = Helper::BREAK;
+    } else {
+      // convert the value to display unit
+      if (!pParameter->getUnit().isEmpty()
+          && pParameter->getUnit().compare(pParameter->getUnitComboBox()->itemData(pParameter->getUnitComboBox()->currentIndex()).toString()) != 0) {
+        bool ok = true;
+        qreal elementModifierRealValue = elementModifierValue.toDouble(&ok);
+        // if the modifier is a literal constant
+        if (ok) {
+          OMCInterface::convertUnits_res convertUnit = pOMCProxy->convertUnits(pParameter->getUnitComboBox()->itemData(pParameter->getUnitComboBox()->currentIndex()).toString(),
+                                                                               pParameter->getUnit());
+          if (convertUnit.unitsCompatible) {
+            elementModifierRealValue = Utilities::convertUnit(elementModifierRealValue, convertUnit.offset, convertUnit.scaleFactor);
+            elementModifierValue = StringHandler::number(elementModifierRealValue);
+          }
+        } else { // if expression
+          elementModifierValue = Utilities::arrayExpressionUnitConversion(pOMCProxy, elementModifierValue,
+                                                                          pParameter->getUnitComboBox()->itemData(pParameter->getUnitComboBox()->currentIndex()).toString(),
+                                                                          pParameter->getUnit());
         }
-      } else { // if expression
-        elementModifierValue = Utilities::arrayExpressionUnitConversion(pOMCProxy, elementModifierValue, pParameter->getUnitComboBox()->itemData(pParameter->getUnitComboBox()->currentIndex()).toString(), pParameter->getUnit());
       }
     }
 
@@ -1955,7 +1998,9 @@ void ElementParameters::updateElementParameters()
           if (pParameter->getFixedFinalEachMenu()->isFinal()) {
             fixedModifier.append("final ");
           }
-          if (pParameter->getFixedState().isEmpty()) {
+          if (pParameter->getFixedFinalEachMenu()->isBreak()) {
+            subModifiers.append(fixedModifier.append("fixed=" % Helper::BREAK));
+          } else if (pParameter->getFixedState().isEmpty()) {
             subModifiers.append(fixedModifier.append("fixed"));
           } else {
             subModifiers.append(fixedModifier.append("fixed=" % pParameter->getFixedState()));
@@ -1964,18 +2009,21 @@ void ElementParameters::updateElementParameters()
       }
       // set displayUnit
       const QString unit = pParameter->getUnitComboBox()->itemData(pParameter->getUnitComboBox()->currentIndex()).toString();
-      // if displayUnit is changed OR if we already have the displayUnit modifier then set it
-      if (pParameter->getUnitComboBox()->isEnabled() && !unit.isEmpty() && (pParameter->hasDisplayUnit() || pParameter->getDisplayUnit().compare(unit) != 0)) {
-        QString displayUnitModifier;
-        /* Issue #11715 and #11839
-         * Add each prefix if element is an array OR parameter is an array.
-         */
-        if ((hasElement() && mpElement->getDimensions().isArray()) || pParameter->getModelInstanceElement()->getDimensions().isArray()) {
-          displayUnitModifier.append("each ");
-        }
-        if (pParameter->getDisplayUnitFinalEachMenu()->isFinal()) {
-          displayUnitModifier.append("final ");
-        }
+      QString displayUnitModifier;
+      /* Issue #11715 and #11839
+       * Add each prefix if element is an array OR parameter is an array.
+       */
+      if ((hasElement() && mpElement->getDimensions().isArray()) || pParameter->getModelInstanceElement()->getDimensions().isArray()) {
+        displayUnitModifier.append("each ");
+      }
+      if (pParameter->getDisplayUnitFinalEachMenu()->isFinal()) {
+        displayUnitModifier.append("final ");
+      }
+      // if break displayUnit
+      if (pParameter->getDisplayUnitFinalEachMenu()->isBreak()) {
+        subModifiers.append(displayUnitModifier.append("displayUnit=" % Helper::BREAK));
+      } else if (pParameter->getUnitComboBox()->isEnabled() && !unit.isEmpty() && (pParameter->hasDisplayUnit() || pParameter->getDisplayUnit().compare(unit) != 0)) {
+        // if displayUnit is changed OR if we already have the displayUnit modifier then set it
         subModifiers.append(displayUnitModifier.append("displayUnit=\"" % unit % "\""));
       }
       // join the submodifiers

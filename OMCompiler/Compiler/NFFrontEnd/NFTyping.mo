@@ -1394,7 +1394,7 @@ algorithm
         next_context := InstContext.set(context, NFInstContext.SUBEXPRESSION);
         (e1, ty1, var1, pur1) := typeExp(exp.exp1, next_context, info);
         (e2, ty2, var2, pur2) := typeExp(exp.exp2, next_context, info);
-        (exp, ty) := TypeCheck.checkRelationOperation(e1, ty1, var1, exp.operator, e2, ty2, var2, context, info);
+        (exp, ty) := TypeCheck.checkRelationOperation(e1, ty1, var1, exp.operator, e2, ty2, var2, exp.index, context, info);
         variability := Prefixes.variabilityMax(var1, var2);
         purity := Prefixes.purityMin(pur1, pur2);
 
@@ -2017,7 +2017,7 @@ algorithm
         // The context used when typing a component node depends on where the
         // component was declared, not where it's used. This can be different to
         // the given context, e.g. for package constants used in a function.
-        node_ty := typeComponent(cref.node, crefContext(cref.node, context), typeChildren = firstPart or not InstContext.inDimension(context));
+        node_ty := typeComponent(cref.node, InstContext.nodeContext(cref.node, context), typeChildren = firstPart or not InstContext.inDimension(context));
 
         (subs, subs_var) := typeSubscripts(cref.subscripts, node_ty, Expression.CREF(node_ty, cref), context, info);
         (rest_cr, rest_var) := typeCref2(cref.restCref, context, info, false);
@@ -2043,31 +2043,6 @@ algorithm
     else (cref, Variability.CONSTANT);
   end match;
 end typeCref2;
-
-function crefContext
-  input InstNode crefNode;
-  input InstContext.Type currentContext;
-  output InstContext.Type context;
-protected
-  InstNode parent;
-  Restriction parent_res;
-algorithm
-  parent := InstNode.explicitParent(crefNode);
-
-  context := InstContext.clearScopeFlags(currentContext);
-
-  // Records might actually be record constructors that should count as
-  // functions here, such record constructors are always root classes.
-  if not InstNode.isRootClass(parent) then
-    context := InstContext.set(context, NFInstContext.CLASS);
-    return;
-  end if;
-
-  parent_res := InstNode.restriction(parent);
-  context := if Restriction.isFunction(parent_res) or Restriction.isRecord(parent_res) then
-    InstContext.set(context, NFInstContext.FUNCTION) else
-    InstContext.set(context, NFInstContext.CLASS);
-end crefContext;
 
 function typeSubscripts
   input list<Subscript> subscripts;
@@ -2690,31 +2665,6 @@ algorithm
   purity := Prefixes.purityMin(cond_pur, Prefixes.purityMin(tb_pur, fb_pur));
 end typeIfExpression;
 
-function evaluateCondition
-  input Expression condExp;
-  input InstContext.Type context;
-  input SourceInfo info;
-  output Boolean condBool;
-protected
-  Expression cond_exp;
-algorithm
-  cond_exp := Ceval.evalExp(condExp, Ceval.EvalTarget.new(info, context));
-
-  if Expression.arrayAllEqual(cond_exp) then
-    cond_exp := Expression.arrayFirstScalar(cond_exp);
-  end if;
-
-  condBool := match cond_exp
-    case Expression.BOOLEAN() then cond_exp.value;
-    else
-      algorithm
-        Error.assertion(false, getInstanceName() + " failed to evaluate condition `" +
-          Expression.toString(condExp) + "`", info);
-      then
-        fail();
-  end match;
-end evaluateCondition;
-
 function typeClassSections
   input InstNode classNode;
   input InstContext.Type context;
@@ -3056,10 +3006,6 @@ algorithm
         e1 := typeIterator(eq.iterator, e1, context, structural = true);
         next_context := InstContext.set(context, NFInstContext.FOR);
         body := list(typeEquation(e, next_context) for e in eq.body);
-
-        if Equation.containsList(body, Equation.isConnection) then
-          Structural.markExp(e1);
-        end if;
       then
         Equation.FOR(eq.iterator, SOME(e1), body, eq.scope, eq.source);
 

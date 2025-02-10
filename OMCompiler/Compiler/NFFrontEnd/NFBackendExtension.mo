@@ -199,7 +199,9 @@ public
     record PREVIOUS end PREVIOUS;
     record CLOCK end CLOCK;
     record CLOCKED end CLOCKED;
-    record PARAMETER end PARAMETER;
+    record PARAMETER
+      Option<Integer> resize_value          "if the parameter is resizable, this is the computed optimal size";
+    end PARAMETER;
     record CONSTANT end CONSTANT;
     record ITERATOR end ITERATOR;
     record RECORD
@@ -293,10 +295,10 @@ public
       input Boolean makeParam;
       output VariableKind varKind;
     algorithm
-      if Type.isRecord(ty) then
+      if Type.isRecord(Type.arrayElementType(ty)) then
         varKind := RECORD({}, makeParam); // ToDo: children!
       elseif makeParam then
-        varKind := PARAMETER();
+        varKind := PARAMETER(NONE());
       elseif Type.isDiscrete(ty) then
         varKind := DISCRETE();
       else
@@ -1299,12 +1301,12 @@ public
       Integer index;
     algorithm
       for var in children loop
-        try
-          SOME(index) := UnorderedMap.get(ComponentRef.firstName(var.name), indexMap);
-          childrenAttr[index] := create(var.typeAttributes, var.ty, var.attributes, var.children, var.comment);
-        else
-          Error.assertion(false, getInstanceName() + " got unknown record child: " + ComponentRef.firstName(var.name), sourceInfo());
-        end try;
+        _ := match UnorderedMap.get(ComponentRef.firstName(var.name), indexMap)
+          case SOME(index) algorithm
+            childrenAttr[index] := create(var.typeAttributes, var.ty, var.attributes, var.children, var.comment);
+          then ();
+          else ();
+        end match;
       end for;
       attributes := VAR_ATTR_RECORD(indexMap, childrenAttr);
     end createRecord;
@@ -1490,10 +1492,17 @@ public
 
     function create
       input Option<SCode.Comment> comment;
+      input Attributes attributes;
       output Annotations annotations = EMPTY_ANNOTATIONS;
     protected
       SCode.Mod mod;
+      Boolean b;
     algorithm
+      // set if it was set globally
+      if attributes.isResizable then
+        annotations.resizable := true;
+      end if;
+
       _ := match comment
         case SOME(SCode.COMMENT(annotation_=SOME(SCode.ANNOTATION(modification=mod as SCode.MOD())))) algorithm
           for submod in mod.subModLst loop
@@ -1501,8 +1510,8 @@ public
               case SCode.NAMEMOD(ident = "HideResult", mod = SCode.MOD(binding = SOME(Absyn.BOOL(true)))) algorithm
                 annotations.hideResult := true;
               then ();
-              case SCode.NAMEMOD(ident = "__OpenModelica_resizable", mod = SCode.MOD(binding = SOME(Absyn.BOOL(true)))) algorithm
-                annotations.resizable := true;
+              case SCode.NAMEMOD(ident = "__OpenModelica_resizable", mod = SCode.MOD(binding = SOME(Absyn.BOOL(b)))) algorithm
+                annotations.resizable := b;
               then ();
               else ();
             end match;

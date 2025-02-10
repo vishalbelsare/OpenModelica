@@ -1,7 +1,7 @@
 /*
  * This file is part of OpenModelica.
  *
- * Copyright (c) 1998-2014, Open Source Modelica Consortium (OSMC),
+ * Copyright (c) 1998-2025, Open Source Modelica Consortium (OSMC),
  * c/o Linköpings universitet, Department of Computer and Information Science,
  * SE-58183 Linköping, Sweden.
  *
@@ -172,6 +172,9 @@ algorithm
       then
         evalBinaryOp(exp1, exp.operator, exp2, target);
 
+    // TODO
+    // case Expression.MULTARY()
+
     case Expression.UNARY()
       algorithm
         exp1 := evalExp(exp.exp, target);
@@ -237,19 +240,6 @@ algorithm
     else exp;
   end match;
 end evalExp;
-
-function evalExpOpt
-  input output Option<Expression> oexp;
-  input EvalTarget target = noTarget;
-algorithm
-  oexp := match oexp
-    local
-      Expression e;
-
-    case SOME(e) then SOME(evalExp(e, target));
-    else oexp;
-  end match;
-end evalExpOpt;
 
 function evalExpPartialDefault
   "Simplied version of evalExpPartial to work around MetaModelica issues with
@@ -346,9 +336,7 @@ protected
   Type cref_ty, exp_ty;
   Integer dim_diff;
 algorithm
-  exp_context := if InstNode.isFunction(InstNode.explicitParent(node))
-    then NFInstContext.FUNCTION else NFInstContext.CLASS;
-
+  exp_context := InstContext.nodeContext(node, target.context);
   Typing.typeComponentBinding(node, exp_context, typeChildren = false);
   comp := InstNode.component(node);
   binding := Component.getBinding(comp);
@@ -592,7 +580,7 @@ algorithm
   // Only use the start value if the component is a fixed parameter.
   var := Component.variability(comp);
   if (var <> Variability.PARAMETER and var <> Variability.STRUCTURAL_PARAMETER) or
-     not Component.getFixedAttribute(comp) then
+     not Component.isFixed(comp) then
     return;
   end if;
 
@@ -696,8 +684,7 @@ protected
 algorithm
   parent_cr := ComponentRef.rest(cref);
   parent := ComponentRef.node(parent_cr);
-  exp_context := if InstNode.isFunction(InstNode.explicitParent(parent))
-    then NFInstContext.FUNCTION else NFInstContext.CLASS;
+  exp_context := InstContext.nodeContext(parent, target.context);
 
   comp := InstNode.component(parent);
   binding := Component.getBinding(comp);
@@ -793,7 +780,7 @@ protected
 algorithm
   Expression.RANGE(ty = ty, start = start_exp, step = step_exp, stop = stop_exp) := rangeExp;
   start_exp := evalExp(start_exp, target);
-  step_exp := evalExpOpt(step_exp, target);
+  step_exp := Util.applyOption(step_exp, function evalExp(target = target));
   stop_exp := evalExp(stop_exp, target);
 
   if InstContext.inIterationRange(target.context) then
@@ -1553,7 +1540,7 @@ function evalRelationOp
   input Expression exp2;
   output Expression exp;
 algorithm
-  exp := Expression.mapSplitExpressions(Expression.RELATION(exp1, op, exp2), evalRelationExp);
+  exp := Expression.mapSplitExpressions(Expression.RELATION(exp1, op, exp2, -1), evalRelationExp);
 end evalRelationOp;
 
 function evalRelationExp
@@ -1585,7 +1572,7 @@ algorithm
     else
       algorithm
         Error.addInternalError(getInstanceName() + ": unimplemented case for " +
-          Expression.toString(Expression.RELATION(exp1, op, exp2)), sourceInfo());
+          Expression.toString(Expression.RELATION(exp1, op, exp2, -1)), sourceInfo());
       then
         fail();
   end match;
@@ -1619,7 +1606,7 @@ algorithm
     else
       algorithm
         printFailedEvalError(getInstanceName(),
-          Expression.RELATION(exp1, Operator.makeLess(Type.UNKNOWN()), exp2), sourceInfo());
+          Expression.RELATION(exp1, Operator.makeLess(Type.UNKNOWN()), exp2, -1), sourceInfo());
       then
         fail();
   end match;
@@ -1651,7 +1638,7 @@ algorithm
     else
       algorithm
         printFailedEvalError(getInstanceName(),
-          Expression.RELATION(exp1, Operator.makeLessEq(Type.UNKNOWN()), exp2), sourceInfo());
+          Expression.RELATION(exp1, Operator.makeLessEq(Type.UNKNOWN()), exp2, -1), sourceInfo());
       then
         fail();
   end match;
@@ -1683,7 +1670,7 @@ algorithm
     else
       algorithm
         printFailedEvalError(getInstanceName(),
-          Expression.RELATION(exp1, Operator.makeGreater(Type.UNKNOWN()), exp2), sourceInfo());
+          Expression.RELATION(exp1, Operator.makeGreater(Type.UNKNOWN()), exp2, -1), sourceInfo());
       then
         fail();
   end match;
@@ -1715,7 +1702,7 @@ algorithm
     else
       algorithm
         printFailedEvalError(getInstanceName(),
-          Expression.RELATION(exp1, Operator.makeGreaterEq(Type.UNKNOWN()), exp2), sourceInfo());
+          Expression.RELATION(exp1, Operator.makeGreaterEq(Type.UNKNOWN()), exp2, -1), sourceInfo());
       then
         fail();
   end match;
@@ -1747,7 +1734,7 @@ algorithm
     else
       algorithm
         printFailedEvalError(getInstanceName(),
-          Expression.RELATION(exp1, Operator.makeEqual(Type.UNKNOWN()), exp2), sourceInfo());
+          Expression.RELATION(exp1, Operator.makeEqual(Type.UNKNOWN()), exp2, -1), sourceInfo());
       then
         fail();
   end match;
@@ -1779,7 +1766,7 @@ algorithm
     else
       algorithm
         printFailedEvalError(getInstanceName(),
-          Expression.RELATION(exp1, Operator.makeNotEqual(Type.UNKNOWN()), exp2), sourceInfo());
+          Expression.RELATION(exp1, Operator.makeNotEqual(Type.UNKNOWN()), exp2, -1), sourceInfo());
       then
         fail();
   end match;
@@ -1943,6 +1930,7 @@ algorithm
     case "mod" then evalBuiltinMod(args, target);
     case "noEvent" then listHead(args); // No events during ceval, just return the argument.
     case "ones" then evalBuiltinOnes(args);
+    case "pre" then listHead(args);
     case "product" then evalBuiltinProduct(listHead(args));
     case "promote" then evalBuiltinPromote(listGet(args,1),listGet(args,2));
     case "rem" then evalBuiltinRem(args, target);
@@ -3260,7 +3248,7 @@ algorithm
     case Expression.RANGE()
       then Expression.RANGE(exp.ty,
                             evalExp(exp.start, target),
-                            evalExpOpt(exp.step, target),
+                            Util.applyOption(exp.step, function evalExp(target = target)),
                             evalExp(exp.stop, target));
 
     else evalExp(exp, target);
@@ -3337,7 +3325,7 @@ algorithm
            Util.getOptionOrDefault(Component.getEvaluateAnnotation(component), false)
         then
           // only add an error if fixed = true
-          if Component.getFixedAttribute(component) then
+          if Component.isFixed(component) then
             Error.addMultiSourceMessage(Error.UNBOUND_PARAMETER_EVALUATE_TRUE,
               {Expression.toString(exp) + "(fixed = true)"},
               {InstNode.info(ComponentRef.node(Expression.toCref(exp))), EvalTarget.getInfo(target)});

@@ -1154,9 +1154,15 @@ void GraphicsView::deleteElement(Element *pElement)
  */
 void GraphicsView::deleteElementFromClass(Element *pElement)
 {
-  if (mpModelWidget->getLibraryTreeItem()->isModelica()) {
+  if (mpModelWidget && mpModelWidget->getLibraryTreeItem() && mpModelWidget->getLibraryTreeItem()->isModelica()) {
     // delete the component from OMC
     MainWindow::instance()->getOMCProxy()->deleteComponent(pElement->getName(), mpModelWidget->getLibraryTreeItem()->getNameStructure());
+    /* Since we don't call getModelInstance on deleting a component so we need to update instance JSON manually by removing the component from it.
+     * This is needed so the Element Browser shows the correct list of components.
+     */
+    if (mpModelWidget->getModelInstance()) {
+      mpModelWidget->getModelInstance()->removeElement(pElement->getName());
+    }
   }
 }
 
@@ -3470,7 +3476,7 @@ void GraphicsView::copyItems(bool cut)
     for (int i = itemsList.size() - 1 ; i >= 0 ; i--) {
       if (itemsList.at(i)->isSelected()) {
         if (Element *pElement = dynamic_cast<Element*>(itemsList.at(i))) {
-          components << pElement->getModelComponent()->toString() % " " % "annotation(" % pElement->getPlacementAnnotation(true) % ");";
+          components << pElement->getModelComponent()->toString(false, true) % " " % "annotation(" % pElement->getPlacementAnnotation(true) % ");";
           // component JSON
           QJsonObject componentJsonObject;
           componentJsonObject.insert(QLatin1String("classname"), pElement->getClassName());
@@ -3890,8 +3896,11 @@ void GraphicsView::pasteItems()
             }
           }
           LineAnnotation *pConnectionLineAnnotation = new LineAnnotation(lineShape, 0, 0, this);
+          // the start and end element of connection is added in ModelWidget::drawConnections() when the connection is updated
           pConnectionLineAnnotation->setStartElementName(connectionObject.value("from").toString());
           pConnectionLineAnnotation->setEndElementName(connectionObject.value("to").toString());
+          pConnectionLineAnnotation->drawCornerItems();
+          pConnectionLineAnnotation->setCornerItemsActiveOrPassive();
           // always add the connections to diagram layer.
           GraphicsView *pDiagramGraphicsView = mpModelWidget->getDiagramGraphicsView();
           pDiagramGraphicsView->addConnectionToView(pConnectionLineAnnotation, false);
@@ -6142,6 +6151,11 @@ void ModelWidget::reDrawModelWidget()
     if (pModelWidget && pModelWidget == this && MainWindow::instance()->getDocumentationDockWidget()->isVisible()) {
       MainWindow::instance()->getDocumentationWidget()->showDocumentation(getLibraryTreeItem());
     }
+    // Update Element Browser
+    if (pModelWidget && pModelWidget->getLibraryTreeItem()) {
+      MainWindow::instance()->getElementWidget()->getElementTreeModel()->addElements(pModelWidget->getModelInstance());
+      MainWindow::instance()->getElementWidget()->selectDeselectElementItem("", false);
+    }
     // clear the undo stack
     mpUndoStack->clear();
 //    if (mpEditor) {
@@ -6810,6 +6824,50 @@ void ModelWidget::selectDeselectElement(const QString &name, bool selected)
 }
 
 /*!
+ * \brief ModelWidget::navigateToClass
+ * Lookup the class and open it.
+ * \param className
+ */
+void ModelWidget::navigateToClass(const QString &className)
+{
+  LibraryWidget *pLibraryWidget = MainWindow::instance()->getLibraryWidget();
+  LibraryTreeItem *pLibraryTreeItem = nullptr;
+  // first see if we find any relative class
+  const QString parentClassName = StringHandler::removeLastWordAfterDot(mpLibraryTreeItem->getNameStructure());
+  pLibraryTreeItem = pLibraryWidget->getLibraryTreeModel()->findLibraryTreeItem(parentClassName % "." % className);
+  if (pLibraryTreeItem) {
+    pLibraryWidget->getLibraryTreeModel()->showModelWidget(pLibraryTreeItem);
+  } else {
+    // relative class not found.
+    bool classFound = false;
+    if (mpModelInstance) {
+      auto imports = mpModelInstance->getImports();
+      foreach (auto import, imports) {
+        if (className.compare(import.getShortName()) == 0) {
+          pLibraryTreeItem = pLibraryWidget->getLibraryTreeModel()->findLibraryTreeItem(import.getPath());
+        } else {
+          const QString importPath = StringHandler::removeLastWordAfterDot(import.getPath());
+          pLibraryTreeItem = pLibraryWidget->getLibraryTreeModel()->findLibraryTreeItem(importPath % "." % className);
+        }
+        // check if we found the class in imports
+        if (pLibraryTreeItem) {
+          classFound = true;
+          break;
+        }
+      }
+    }
+    // if class is not found in imports then see if the class is fully qualified path.
+    if (!classFound) {
+      pLibraryTreeItem = pLibraryWidget->getLibraryTreeModel()->findLibraryTreeItem(className);
+    }
+    // if class is found then open it.
+    if (pLibraryTreeItem) {
+      pLibraryWidget->getLibraryTreeModel()->showModelWidget(pLibraryTreeItem);
+    }
+  }
+}
+
+/*!
  * \brief ModelWidget::createUndoStack
  * Creates the undo stack.
  */
@@ -7075,7 +7133,6 @@ void ModelWidget::drawOMSModelConnections()
         pConnectionLineAnnotation->setStartElementName(pStartConnectorComponent->getLibraryTreeItem() ? pStartConnectorComponent->getLibraryTreeItem()->getNameStructure() : "");
         pConnectionLineAnnotation->setEndElementName(pEndConnectorComponent->getLibraryTreeItem() ? pEndConnectorComponent->getLibraryTreeItem()->getNameStructure() : "");
         pConnectionLineAnnotation->setOMSConnectionType(pConnections[i]->type);
-        pConnectionLineAnnotation->updateToolTip();
         pConnectionLineAnnotation->drawCornerItems();
         pConnectionLineAnnotation->setCornerItemsActiveOrPassive();
         mpDiagramGraphicsView->addConnectionToView(pConnectionLineAnnotation, false);

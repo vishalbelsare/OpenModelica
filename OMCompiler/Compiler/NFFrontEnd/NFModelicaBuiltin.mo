@@ -1462,10 +1462,12 @@ function loadClassContentString
   "Loads class elements from a string and inserts them into the given loaded class."
   input String data;
   input TypeName className;
+  input Integer offsetX = 0;
+  input Integer offsetY = 0;
   output Boolean success;
 external "builtin";
 annotation(preferredView="test",Documentation(info="<html>
-<p>Loads class content from a string and inserts it into the given loaded class.
+<p>Loads class content from a string and inserts it into the given loaded class with an optional position offset for graphical annotations.
 The existing class must be a long class definition, either normal or class
 extends. The content is merged according to the following rules:</p>
 <p>
@@ -1491,6 +1493,9 @@ loadClassContentString(\"
 \", P.M);
 </pre>
 </blockquote>
+</p>
+<p>
+If an offset is given it will be applied to the graphical annotations on the loaded content before it's merged into the class, for example Placement annotations on components.
 </p>
 </html>"));
 end loadClassContentString;
@@ -3007,6 +3012,18 @@ external "builtin";
 annotation(preferredView="text");
 end copyClass;
 
+function renameClass
+  input TypeName oldName "The path of the class to rename.";
+  input TypeName newName "The new non-qualified name of the class.";
+  output TypeName[:] result;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Renames a class and updates references to it in the loaded classes. Returns a list of classes that were changed.
+</html>"),
+  preferredView="text");
+end renameClass;
+
 function deleteClass
   input TypeName className;
   output Boolean success;
@@ -3507,6 +3524,32 @@ annotation(
   preferredView="text");
 end deleteComponent;
 
+function renameComponent
+  input TypeName classPath;
+  input VariableName oldName;
+  input VariableName newName;
+  output TypeName[:] result;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Renames a component and updates references to it in the loaded classes. Returns a list of classes that were changed.
+</html>"),
+  preferredView="text");
+end renameComponent;
+
+function renameComponentInClass
+  input TypeName classPath;
+  input VariableName oldName;
+  input VariableName newName;
+  output TypeName[:] result;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Renames a component only in the given class. Returns the name of the class if successful.
+</html>"),
+  preferredView="text");
+end renameComponentInClass;
+
 function getParameterNames
   input TypeName class_;
   output String[:] parameters;
@@ -3613,6 +3656,17 @@ array:</p>
 </html>"),
   preferredView="text");
 end getElements;
+
+function getElementsInfo
+  input TypeName className;
+  output Expression result;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+<p>Returns information about the elements in a given class.</p>
+</html>"),
+  preferredView="text");
+end getElementsInfo;
 
 function getComponentModifierNames
   input TypeName class_;
@@ -3771,6 +3825,19 @@ annotation(
   preferredView="text");
 end removeElementModifiers;
 
+function getExtendsModifierValue
+  input TypeName className;
+  input TypeName extendsName;
+  input TypeName modifierName;
+  output Expression result;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Returns the modifier value for a modifier on an extends clause.
+</html>"),
+  preferredView="text");
+end getExtendsModifierValue;
+
 function setExtendsModifierValue
   input TypeName className;
   input TypeName extendsName;
@@ -3810,6 +3877,19 @@ annotation(
 Sets a modifier on an extends clause in a class definition."),
   preferredView="text");
 end setExtendsModifier;
+
+function isExtendsModifierFinal
+  input TypeName className;
+  input TypeName extendsName;
+  input TypeName modifierName;
+  output Boolean isFinal;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  Returns whether a modifier on an extends clause is final or not.
+</html>"),
+  preferredView="text");
+end isExtendsModifierFinal;
 
 function getComponentCount
   input TypeName classPath;
@@ -3976,6 +4056,21 @@ annotation(
 </html>"),
   preferredView="text");
 end setComponentDimensions;
+
+function setComponentProperties
+  input TypeName className;
+  input TypeName componentName;
+  input Boolean[:] prefixArray;
+  input String[1] variability;
+  input Boolean[2] innerOuter;
+  input String[1] direction;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+  <p>Sets the properties of a component in a class. The prefixArray argument is an array of 4 or 5 values: final, flow, stream (optional), protected, replaceable.</p>
+</html>"),
+  preferredView="text");
+end setComponentProperties;
 
 function getNthConnector
   input TypeName className;
@@ -5246,6 +5341,36 @@ annotation(
 </html>"), preferredView="text");
 end getClassInformation;
 
+function getCrefInfo
+  input TypeName cl;
+  output Expression[:] result;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+<p>Deprecated; use getClassInformation instead.</p>
+</html>"), preferredView="text");
+end getCrefInfo;
+
+function getDefaultComponentName
+  input TypeName cl;
+  output String name;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+<p>Returns the default component name for a class as defined by the defaultComponentName annotation.</p>
+</html>"), preferredView="text");
+end getDefaultComponentName;
+
+function getDefaultComponentPrefixes
+  input TypeName cl;
+  output String prefixes;
+external "builtin";
+annotation(
+  Documentation(info="<html>
+<p>Returns the default component prefixes for a class as defined by the defaultComponentPrefixes annotation.</p>
+</html>"), preferredView="text");
+end getDefaultComponentPrefixes;
+
 function getShortDefinitionBaseClassInformation
   input TypeName className;
   output Expression result;
@@ -6308,10 +6433,9 @@ package AutoCompletion "Auto completion information for OMEdit."
       String zeroDerivative;
     end derivative;
 
-    record __OpenModelica_commandLineOptions
-    end __OpenModelica_commandLineOptions;
+    String __OpenModelica_commandLineOptions "annotation(__OpenModelica_commandLineOptions = \"--matchingAlgorithm=BFSB --indexReductionMethod=dynamicStateSelection\");";
 
-    record __OpenModelica_simulationFlags
+    record __OpenModelica_simulationFlags "annotation(__OpenModelica_simulationFlags(s = \"heun\", cpu = \"()\"));"
     end __OpenModelica_simulationFlags;
 
     // TODO: Annotation for External Libraries and Include Files

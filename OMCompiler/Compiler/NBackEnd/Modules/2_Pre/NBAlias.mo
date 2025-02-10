@@ -259,7 +259,7 @@ protected
           // otherwise they would not show in the result file
           (const_vars, alias_vars) := List.splitOnTrue(alias_vars, BVariable.hasConstOrParamAliasBinding);
           for var in const_vars loop
-            BVariable.setVarKind(var, VariableKind.PARAMETER());
+            BVariable.setVarKind(var, VariableKind.PARAMETER(NONE()));
             BVariable.setBindingAsStartAndFix(var);
           end for;
           varData.parameters := VariablePointers.addList(const_vars, varData.parameters);
@@ -708,7 +708,6 @@ protected
         AttributeCollector collector;
         Pointer<Pointer<Variable>> var_to_keep = Pointer.create(Pointer.create(NBVariable.DUMMY_VARIABLE));
         Status status;
-        Boolean invertRelation;
 
       case SOME(const_eq) algorithm
         // there is a constant binding -> no variable will be kept and all will be replaced by a constant
@@ -739,7 +738,7 @@ protected
         for var in var_lst loop
           rhs := UnorderedMap.getSafe(BVariable.getVarName(var), replacements, sourceInfo());
           eq := Equation.makeAssignment(BVariable.toExpression(var), rhs, Pointer.create(0), NBEquation.TMP_STR, Iterator.EMPTY(), EquationAttributes.default(EquationKind.UNKNOWN, false));
-          (solved_eq,_,status, invertRelation) := Solve.solveBody(Pointer.access(eq), BVariable.getVarName(Pointer.access(var_to_keep)), FunctionTreeImpl.EMPTY());
+          (solved_eq,_,status, _) := Solve.solveBody(Pointer.access(eq), BVariable.getVarName(Pointer.access(var_to_keep)), FunctionTreeImpl.EMPTY());
           collector := AttributeCollector.fixValues(collector, BVariable.getVarName(var), solved_eq);
         end for;
         if Flags.isSet(Flags.DEBUG_ALIAS) then
@@ -1013,7 +1012,7 @@ protected
     (zeroes, constants) := List.splitOnTrue(constants, Expression.isZero);
 
     // report non literal nominal values if failtrace is activated
-    if Flags.isSet(Flags.FAILTRACE) then
+    if Flags.isSet(Flags.FAILTRACE) and not listEmpty(rest) then
       str := getInstanceName() + ": There are non literal nominal values in following alias set:\n"
         + AliasSet.toString(set) + "\n\tNominal map after replacements (conflicting array index = "
         + intString(index) + "):\n\t" + UnorderedMap.toString(map, ComponentRef.toString, Expression.toString,"\n\t");
@@ -1038,7 +1037,7 @@ protected
       end if;
     end if;
 
-    // zero valued and non literal nominal values are not allowed
+    // zero valued nominal values are not allowed
     if not listEmpty(zeroes) then
       str := getInstanceName() + " failed because zero values are not allowed.";
       if Flags.isSet(Flags.DUMP_REPL) then

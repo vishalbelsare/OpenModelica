@@ -568,14 +568,7 @@ protected
   String actualVersionStr, pathStr;
 algorithm
   semverWanted := SemanticVersion.parse(version);
-  _ := match actualVersion
-    case SOME(actualVersionStr)
-      then ();
-    case NONE()
-      algorithm
-        actualVersionStr := "";
-      then ();
-  end match;
+  actualVersionStr := Util.getOptionOrDefault(actualVersion, "");
   pathStr := AbsynUtil.pathString(path);
   semverActual := SemanticVersion.parse(actualVersionStr);
   if 0 == SemanticVersion.compare(semverWanted, semverActual, comparePrerelease=false) then
@@ -688,9 +681,8 @@ algorithm
         Absyn.PROGRAM(classes=classes,within_=within_) := Parser.parsestring(str1,str2);
         paths := list(Absyn.Path.IDENT(AbsynUtil.className(c)) for c in classes);
         paths := List.map1r(paths,AbsynUtil.joinWithinPath,within_);
-        vals := List.map(paths,ValuesUtil.makeCodeTypeName);
       then
-        ValuesUtil.makeArray(vals);
+        ValuesUtil.makeCodeTypeNameArray(paths);
 
     case ("parseString",_)
       then ValuesUtil.makeArray({});
@@ -701,9 +693,8 @@ algorithm
         Error.clearMessages() "Clear messages";
         Print.clearErrorBuf() "Clear error buffer";
         paths := Interactive.parseFile(str1, encoding);
-        vals := List.map(paths,ValuesUtil.makeCodeTypeName);
       then
-        ValuesUtil.makeArray(vals);
+        ValuesUtil.makeCodeTypeNameArray(paths);
 
     case ("loadFileInteractiveQualified",{Values.STRING(str1),Values.STRING(encoding)})
       algorithm
@@ -711,9 +702,8 @@ algorithm
         Error.clearMessages() "Clear messages";
         Print.clearErrorBuf() "Clear error buffer";
         paths := Interactive.parseFile(str1, encoding, updateProgram=true);
-        vals := List.map(paths,ValuesUtil.makeCodeTypeName);
       then
-        ValuesUtil.makeArray(vals);
+        ValuesUtil.makeCodeTypeNameArray(paths);
 
     case ("loadFileInteractive",{Values.STRING(str1),Values.STRING(encoding),Values.BOOL(b),Values.BOOL(b1),Values.BOOL(requireExactVersion)})
       algorithm
@@ -1558,9 +1548,8 @@ algorithm
       algorithm
         paths := InteractiveUtil.getAllSubtypeOf(path, parentClass, SymbolTable.getAbsyn(), qualified, includePartial, sort);
         paths := if sort then List.sort(paths, AbsynUtil.pathGe) else paths;
-        vals := List.map(paths,ValuesUtil.makeCodeTypeName);
       then
-        ValuesUtil.makeArray(vals);
+        ValuesUtil.makeCodeTypeNameArray(paths);
 
     // check for OMSimulator API calls
     case (_,_)
@@ -3205,7 +3194,7 @@ algorithm
     paths := List.sort(paths, AbsynUtil.pathGe);
   end if;
 
-  res := ValuesUtil.makeArray(list(ValuesUtil.makeCodeTypeName(p) for p in paths));
+  res := ValuesUtil.makeCodeTypeNameArray(paths);
 end getClassNames;
 
 function checkSettings

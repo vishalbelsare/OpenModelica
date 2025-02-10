@@ -219,17 +219,14 @@ public
       input output list<Pointer<Variable>> auxiliary_vars;
       input output list<Pointer<Equation>> auxiliary_eqns;
     protected
-      list<ComponentRef> iter;
-      list<Expression> range;
       ComponentRef lhs_cref;
       Pointer<Equation> aux_eqn;
     algorithm
       // if it has a statement index, it already has been created as a statement inside an algorithm (0 implies no index)
       if cond.stmt_index == 0 then
-        (iter, range) := Equation.Iterator.getFrames(cond.iter);
         // lower the subscripts (containing iterators)
         lhs_cref := ComponentRef.mapSubscripts(BVariable.getVarName(aux_var), function Subscript.mapExp(func = function BackendDAE.lowerComponentReferenceExp(variables = variables)));
-        aux_eqn := Equation.makeAssignment(Expression.fromCref(lhs_cref), cond.exp, idx, "EVT", Iterator.fromFrames(List.zip(iter, range)), EquationAttributes.default(EquationKind.DISCRETE, false));
+        aux_eqn := Equation.makeAssignment(Expression.fromCref(lhs_cref), cond.exp, idx, "EVT", cond.iter, EquationAttributes.default(EquationKind.DISCRETE, false));
         auxiliary_eqns := aux_eqn :: auxiliary_eqns;
       end if;
       // remove all subscripts from the variable name
@@ -415,7 +412,8 @@ public
           local
             Equation tmpEqn;
             Solve.Status status;
-            Boolean invert, can_trigger;
+            Boolean can_trigger;
+            Solve.RelationInversion invert;
             Call call;
             Expression trigger, new_exp;
             TimeEvent timeEvent;
@@ -436,10 +434,10 @@ public
             _ := Equation.map(tmpEqn, function containsTimeTraverseExp(b = containsTime), SOME(function containsTimeTraverseCref(b = containsTime)));
             if Pointer.access(containsTime) then
               (tmpEqn, _, status, invert) := Solve.solveBody(tmpEqn, NFBuiltin.TIME_CREF, funcTree);
-              if status == NBSolve.Status.EXPLICIT then
+              if status == NBSolve.Status.EXPLICIT and invert <> NBSolve.RelationInversion.UNKNOWN then
                 trigger := Equation.getRHS(tmpEqn);
-                exp.operator := if invert then Operator.invert(exp.operator) else exp.operator;
-
+                // only cases for RelationInversion == TRUE or FALSE can be present
+                exp.operator := if invert == NBSolve.RelationInversion.TRUE then Operator.invert(exp.operator) else exp.operator;
                 if Equation.isWhenEquation(eqn) then
                   // if it is a when equation check if it can even trigger
                   can_trigger := match exp.operator.op
@@ -636,7 +634,7 @@ public
         case Statement.FOR(range = SOME(range)) algorithm
           new_stmts := {};
           name := ComponentRef.fromNode(stmt.iterator, Type.INTEGER());
-          new_frames := (name, range) :: frames;
+          new_frames := (name, range, NONE()) :: frames;
           for elem in stmt.body loop
             new_stmt := fromStatement(elem, bucket_ptr, eqn, variables, funcTree, new_frames);
             new_stmts := new_stmt :: new_stmts;
@@ -700,6 +698,7 @@ public
 
         // add the new event to the map
         sev := STATE_EVENT(UnorderedMap.size(bucket.state_map), aux_var, {eqn});
+        condition := Condition.setRelationIndex(condition, sev.index);
         UnorderedMap.add(condition, sev, bucket.state_map);
       end if;
 
@@ -930,6 +929,21 @@ public
       input Condition cond;
       output Integer s = Iterator.size(cond.iter);
     end size;
+
+    function setRelationIndex
+      input output Condition cond;
+      input Integer index;
+    algorithm
+      cond.exp := match cond.exp
+        local
+          Expression exp;
+        case exp as Expression.RELATION()
+          algorithm
+            exp.index := index;
+          then exp;
+        else cond.exp;
+      end match;
+    end setRelationIndex;
   end Condition;
 
 // =========================================================================
@@ -1070,6 +1084,8 @@ protected
         Bucket bucket;
         ClockKind clk;
         Expression condition;
+        Call call;
+        list<Frame> new_frames;
 
       // logical unarys: e.g. not a
       // FIXME this is wrong for `not initial()`
@@ -1112,6 +1128,19 @@ protected
       case Expression.CREF() guard(BVariable.isPrevious(BVariable.getVarPointer(exp.cref))) algorithm
         (exp, bucket) := CompositeEvent.add(exp, iter, Pointer.access(bucket_ptr), createEqn);
         Pointer.update(bucket_ptr, bucket);
+      then exp;
+
+      // add the reduction iterators to the iterator used to build the condition
+      // ToDo: if they are not ranges we need to normalize them
+      case Expression.CALL(call = call as Call.TYPED_REDUCTION()) algorithm
+        new_frames := list((ComponentRef.fromNode(Util.tuple21(tpl), Type.INTEGER()), Util.tuple22(tpl), NONE()) for tpl in call.iters);
+        call.exp := Expression.mapReverse(call.exp, function collectEventsTraverse(
+          bucket_ptr  = bucket_ptr,
+          iter        = Iterator.addFrames(iter, new_frames),
+          eqn         = eqn,
+          funcTree    = funcTree,
+          createEqn   = createEqn));
+        exp.call := call;
       then exp;
 
       // ToDo: math events (check the call name in a function and merge with sample case?)

@@ -38,6 +38,7 @@ protected
   import Slice = NBSlice;
 
   // NF imports
+  import Call = NFCall;
   import ComplexType = NFComplexType;
   import ComponentRef = NFComponentRef;
   import Dimension = NFDimension;
@@ -232,8 +233,21 @@ public
     input UnorderedSet<ComponentRef> acc;
   algorithm
     () := match exp
+      local
+        Expression call_exp;
+        Call call;
+
       case Expression.CREF() algorithm filter(exp.cref, acc); then ();
-      else ();
+      case Expression.CALL(call = call as Call.TYPED_REDUCTION(exp = call_exp)) algorithm
+        for iter in call.iters loop
+          call_exp := Expression.replaceIterator(call_exp, Util.tuple21(iter), Util.tuple22(iter));
+        end for;
+        _ := Expression.mapShallow(call_exp, function filterExp(filter = filter, acc = acc));
+      then ();
+
+      else algorithm
+        _ := Expression.mapShallow(exp, function filterExp(filter = filter, acc = acc));
+      then ();
     end match;
   end filterExp;
 
@@ -242,8 +256,10 @@ public
     Note: the name has to be stripped of all subscripts for this to work."
   extends filterCref;
     input ComponentRef name "the name of the variable";
+  protected
+    ComponentRef checkCref = ComponentRef.stripSubscriptsAll(cref);
   algorithm
-    if ComponentRef.isEqual(name, ComponentRef.stripSubscriptsAll(cref)) then
+    if ComponentRef.isEqual(name, checkCref) or ComponentRef.isEqualRecordChild(name, checkCref) then
       UnorderedSet.add(cref, acc);
     end if;
   end getSliceCandidates;
@@ -313,9 +329,9 @@ public
   algorithm
     // put all unsolvable logic here!
     exp := match exp
-      case Expression.RANGE()     then Expression.map(exp, function filterExp(filter = function getDependentCref(map = map, pseudo = pseudo), acc = acc));
-      case Expression.LBINARY()   then Expression.map(exp, function filterExp(filter = function getDependentCref(map = map, pseudo = pseudo), acc = acc));
-      case Expression.RELATION()  then Expression.map(exp, function filterExp(filter = function getDependentCref(map = map, pseudo = pseudo), acc = acc));
+      case Expression.RANGE()     then Expression.mapShallow(exp, function filterExp(filter = function getDependentCref(map = map, pseudo = pseudo), acc = acc));
+      case Expression.LBINARY()   then Expression.mapShallow(exp, function filterExp(filter = function getDependentCref(map = map, pseudo = pseudo), acc = acc));
+      case Expression.RELATION()  then Expression.mapShallow(exp, function filterExp(filter = function getDependentCref(map = map, pseudo = pseudo), acc = acc));
       else exp;
     end match;
   end getUnsolvableExpCrefs;
@@ -328,7 +344,7 @@ public
     input Mapping mapping                         "array <-> scalar index mapping";
     output list<Integer> indices = {};
   protected
-    list<ComponentRef> scalarized_dependencies = List.flatten(list(ComponentRef.scalarizeAll(dep) for dep in dependencies));
+    list<ComponentRef> scalarized_dependencies = List.flatten(list(ComponentRef.scalarizeAll(dep, true) for dep in dependencies));
     ComponentRef stripped;
     Integer var_arr_idx, var_start, var_scal_idx;
     list<Integer> sizes, int_subs;
@@ -353,7 +369,7 @@ public
     Turns cref dependencies into index lists, used for adjacency."
     extends getDependentCrefIndices;
   protected
-    list<ComponentRef> scalarized_dependencies = List.flatten(list(ComponentRef.scalarizeAll(dep) for dep in dependencies));
+    list<ComponentRef> scalarized_dependencies = List.flatten(list(ComponentRef.scalarizeAll(dep, true) for dep in dependencies));
     ComponentRef stripped;
     Integer eqn_start, eqn_size, var_arr_idx, var_scal_idx, mode = 1;
     list<Integer> scal_lst;
@@ -503,9 +519,9 @@ public
 
     // get row cref lst
     if implicit then
-      row_crefs := ComponentRef.scalarizeSlice(row_cref, slice);
+      row_crefs := ComponentRef.scalarizeSlice(row_cref, slice, true);
     else
-      for cref in ComponentRef.scalarizeAll(row_cref) loop
+      for cref in ComponentRef.scalarizeAll(row_cref, true) loop
         row_scal_lst  := getCrefInFrameIndices(cref, frames, eqn_rep_mapping, eqn_rep.map);
         accum_row_lst := row_scal_lst :: accum_row_lst;
       end for;
@@ -550,7 +566,7 @@ public
     // get all dependencies for each scalarized cref
     // Note: scalarization does not remove the iterators, therefore it can still yield
     //   multiple scalar indices when evaluated along the iterator frames
-    for scal_cref in ComponentRef.scalarizeAll(dep) loop
+    for scal_cref in ComponentRef.scalarizeAll(dep, true) loop
       scal_lst := getCrefInFrameIndices(scal_cref, frames, mapping, map);
       scal_tpl_lst := (scal_cref, scal_lst) :: scal_tpl_lst;
     end for;
@@ -638,10 +654,14 @@ public
     list<ComponentRef> row_cref_scal;
     list<list<ComponentRef>> dependencies_scal;
   algorithm
-    row_cref_scal := ComponentRef.scalarizeSlice(row_cref, slice);
-    dependencies_scal := list(ComponentRef.scalarizeSlice(dep, slice) for dep in dependencies);
-    dependencies_scal := List.transposeList(dependencies_scal);
-    tpl_lst := List.zip(row_cref_scal, dependencies_scal);
+    row_cref_scal := ComponentRef.scalarizeSlice(row_cref, slice, true);
+    dependencies_scal := list(ComponentRef.scalarizeSlice(dep, slice, true) for dep in dependencies);
+    if not listEmpty(dependencies_scal) then
+      dependencies_scal := List.transposeList(dependencies_scal);
+      tpl_lst := List.zip(row_cref_scal, dependencies_scal);
+    else
+      tpl_lst := list((cref, {}) for cref in row_cref_scal);
+    end if;
   end getDependentCrefsPseudoArrayCausalized;
 
   function locationToIndex
@@ -761,7 +781,7 @@ public
           Expression linMap;
 
         // equal inertia, combine the frames
-        case ((inertia1, (loc1, (name1, _))), (inertia2, (loc2, (name2, _)))) guard(inertia1 == inertia2) algorithm
+        case ((inertia1, (loc1, (name1, _, _))), (inertia2, (loc2, (name2, _, _)))) guard(inertia1 == inertia2) algorithm
           addOp := Operator.fromClassification((NFOperator.MathClassification.ADDITION, NFOperator.SizeClassification.SCALAR), Type.INTEGER());
           mulOp := Operator.fromClassification((NFOperator.MathClassification.MULTIPLICATION, NFOperator.SizeClassification.SCALAR), Type.INTEGER());
           if arrayLength(loc1) <> arrayLength(loc2) then
@@ -1012,17 +1032,21 @@ public
     input Mapping mapping                         "array <-> scalar index mapping";
     output list<Integer> indices = {};
   protected
-    list<ComponentRef> scalarized_dependencies = List.flatten(list(ComponentRef.scalarizeAll(dep) for dep in dependencies));
-    ComponentRef stripped;
+    list<ComponentRef> scalarized_dependencies = List.flatten(list(ComponentRef.scalarizeAll(dep, true) for dep in dependencies));
+    ComponentRef replaced, stripped;
     Integer var_arr_idx, var_start, var_scal_idx;
     list<Integer> sizes, int_subs;
   algorithm
     for cref in scalarized_dependencies loop
-      stripped := ComponentRef.stripSubscriptsAll(cref);
+      // remove all resizable parameters from cref
+      replaced := ComponentRef.mapExp(cref, Expression.replaceResizableParameter);
+      // remove all subscripts from cref
+      stripped := ComponentRef.stripSubscriptsAll(replaced);
+
       var_arr_idx := UnorderedMap.getSafe(stripped, map, sourceInfo());
       (var_start, _) := mapping.var_AtS[var_arr_idx];
       sizes := ComponentRef.sizes(stripped, false);
-      int_subs := ComponentRef.subscriptsToInteger(cref);
+      int_subs := ComponentRef.subscriptsToInteger(replaced);
       var_scal_idx := locationToIndex(List.zip(sizes, int_subs), var_start);
       indices := var_scal_idx :: indices;
     end for;
@@ -1141,7 +1165,7 @@ protected
       // skip to an array element
       case (Type.ARRAY(), rest) guard List.compareLength(rest, ty.dimensions) >= 0 algorithm
         (rest, tail) := List.split(rest, listLength(ty.dimensions));
-        index := locationToIndex(List.zip(list(Dimension.size(dim) for dim in ty.dimensions), rest), index);
+        index := locationToIndex(List.zip(list(Dimension.size(dim, true) for dim in ty.dimensions), rest), index);
       then resolveSkips(index, ty.elementType, tail, cref, fullmap);
 
       // skip for tuple or array, but the skip is too large
@@ -1196,7 +1220,7 @@ protected
     "resolves the dependency of a component reference in an equation.
     I.  Resolve skip dimensions (Tuples, Records, Array Constructors)
     II. Resolve regular vs. reduced dimensions"
-    input ComponentRef cref;
+    input ComponentRef original_cref;
     input ComponentRef eqn_name;
     input Integer eqn_arr_idx;
     input Iterator iter;
@@ -1217,7 +1241,7 @@ protected
     list<Expression> ranges;
     list<tuple<ComponentRef, Expression>> frames;
     list<Boolean> regulars;
-    ComponentRef stripped;
+    ComponentRef cref, stripped;
     list<Subscript> subs;
     list<Dimension> dims, eq_dims;
     array<Integer> key;
@@ -1230,8 +1254,11 @@ protected
     Mode mode;
   algorithm
     try
+      // remove resizable parameters for index lookup
+      cref := ComponentRef.mapExp(original_cref, Expression.replaceResizableParameter);
+
       // I. resolve the skips
-      d                   := UnorderedMap.getSafe(cref, dep, sourceInfo());
+      d                   := UnorderedMap.getSafe(original_cref, dep, sourceInfo());
       (start, _)          := mapping.eqn_AtS[eqn_arr_idx];
       if not UnorderedSet.contains(cref, rep) then
         skip_lst := resolveSkipsLst(start, ty, arrayList(d.skips), cref, fullmap);
@@ -1242,8 +1269,8 @@ protected
       for tpl in skip_lst loop
         (skip_idx, skip_ty) := tpl;
         // get equation and iterator sizes and frames
-        body_size       := Type.sizeOf(skip_ty);
-        iter_size       := Iterator.size(iter);
+        body_size       := Type.sizeOf(skip_ty, true);
+        iter_size       := Iterator.size(iter, true);
         size            := body_size * iter_size;
         (names, ranges) := Iterator.getFrames(iter);
         frames          := List.zip(names, ranges);
@@ -1252,8 +1279,8 @@ protected
         regulars := Dependency.toBoolean(d);
         if List.all(regulars, Util.id) then
           // II.1 all regular - single dependency per row.
-          mode := Mode.create(eqn_name, {cref}, false);
-          scalarized  := listReverse(ComponentRef.scalarizeAll(cref));
+          mode        := Mode.create(eqn_name, {original_cref}, false);
+          scalarized  := listReverse(ComponentRef.scalarizeAll(cref, true));
           map3        := UnorderedMap.new<Val2>(ComponentRef.hash, ComponentRef.isEqual);
           for scal in scalarized loop
             UnorderedMap.add(scal, getCrefInFrameIndices(scal, frames, mapping, map), map3);
@@ -1270,7 +1297,7 @@ protected
               end for;
             end for;
           else
-            Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " (single dependency) failed because list of scalar variables("
+            Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " (single dependency) failed because list of scalar variables ("
               + intString(scal_size) + ") " + List.toString(scalarized, ComponentRef.toString)
               + ", does not fit the equation size " + intString(size) + ".\n"});
             fail();
@@ -1299,7 +1326,7 @@ protected
 
             // 4. iterate over all equation dimensions and use the map to get the correct dependencies
             key := arrayCreate(listLength(subs), 0);
-            resolveEquationDimensions(List.zip(eq_dims, regulars), map2, key, m, modes, Mode.create(eqn_name, {cref}, false), Pointer.create(skip_idx));
+            resolveEquationDimensions(List.zip(eq_dims, regulars), map2, key, m, modes, Mode.create(eqn_name, {original_cref}, false), Pointer.create(skip_idx));
           else
             Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed because subscripts, dimensions and dependencies were not of equal length.\n"
               + "variable subscripts(" + intString(listLength(subs)) + "): " + List.toString(subs, Subscript.toString) + "\n"
@@ -1312,7 +1339,7 @@ protected
         else
           // II.3 all reduced - full dependency per row. scalarize and add to all rows of the equation
           repeated    := UnorderedSet.contains(cref, rep);
-          scalarized  := listReverse(ComponentRef.scalarizeAll(cref));
+          scalarized  := listReverse(ComponentRef.scalarizeAll(cref, true));
           map3        := UnorderedMap.new<Val2>(ComponentRef.hash, ComponentRef.isEqual);
           for scal in scalarized loop
             UnorderedMap.add(scal, getCrefInFrameIndices(scal, frames, mapping, map), map3);
@@ -1320,7 +1347,7 @@ protected
 
           // if its repeated, use the same cref always
           if repeated then
-            mode := Mode.create(eqn_name, {cref}, false);
+            mode := Mode.create(eqn_name, {original_cref}, false);
           end if;
 
           for i in skip_idx:iter_size:skip_idx+size-iter_size loop
@@ -1328,7 +1355,7 @@ protected
             for scal in scalarized loop
               // if its not repeated use local cref
               if not repeated then
-                mode := Mode.create(eqn_name, {scal}, true);
+                mode := Mode.create(eqn_name, {original_cref}, true);
               end if;
               for scal_idx in UnorderedMap.getSafe(scal, map3, sourceInfo()) loop
                 if intMod(shift, iter_size) == 0 then shift := 0; end if;
@@ -1340,7 +1367,7 @@ protected
         end if;
       end for;
     else
-      Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for: " + ComponentRef.toString(cref) + "."});
+      Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName() + " failed for: " + ComponentRef.toString(original_cref) + "."});
       fail();
     end try;
   end resolveDependency;
@@ -1377,7 +1404,7 @@ protected
 
       case (dim, false)::rest algorithm
         // reduced dimension, keep key index at 0 and go deeper with next dimension
-        for i in 1:Dimension.size(dim) loop
+        for i in 1:Dimension.size(dim, true) loop
           resolveEquationDimensions(rest, map, key, m, modes, mode, eqn_idx_ptr, index+1);
         end for;
       then ();
@@ -1385,7 +1412,7 @@ protected
       case (dim, true)::rest algorithm
         // regular dimension, update key index to corresponding dimension index
         // and go deeper with next dimension
-        for i in 1:Dimension.size(dim) loop
+        for i in 1:Dimension.size(dim, true) loop
           arrayUpdate(key, index, i);
           resolveEquationDimensions(rest, map, key, m, modes, mode, eqn_idx_ptr, index+1);
         end for;
@@ -1430,7 +1457,7 @@ protected
 
       case {} algorithm
         cref := ComponentRef.mergeSubscripts(listReverse(acc), stripped);
-        val := ComponentRef.scalarizeAll(cref);
+        val := ComponentRef.scalarizeAll(cref, true);
         UnorderedMap.add(arrayList(key), val, map);
       then ();
 
@@ -1440,7 +1467,7 @@ protected
 
       case (sub, dim, true)::rest algorithm
         sub_idx := 1;
-        for s in Subscript.scalarize(sub, dim) loop
+        for s in Subscript.scalarize(sub, dim, true) loop
           arrayUpdate(key, index, sub_idx);
           resolveReductions(rest, map, key, stripped, s::acc, index+1);
           sub_idx := sub_idx + 1;
@@ -1568,10 +1595,11 @@ protected
       local
         ComponentRef name;
         Expression exp;
+        Option<Iterator> map;
 
-      case (name, exp as Expression.RANGE()) then (name, Expression.sliceRange(exp, range));
+      case (name, exp as Expression.RANGE(), map) then (name, Expression.sliceRange(exp, range), map);
 
-      case (_, exp) algorithm
+      case (_, exp, _) algorithm
         Error.addMessage(Error.INTERNAL_ERROR,{getInstanceName()
           + " failed because frame expression was not Expression.RANGE(): " + Expression.toString(exp)});
       then fail();

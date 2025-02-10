@@ -65,6 +65,7 @@ getInheritedClasses1.mos \
 getInheritedClasses2.mos \
 getNthComponentAnnotation.mos \
 getNthConnector.mos \
+getNthConnectorIconAnnotation.mos \
 getSimulationOptions1.mos \
 getSimulationOptions2.mos \
 getSimulationOptions3.mos \
@@ -94,6 +95,7 @@ ListExpressions.mos \
 ListImport.mos \
 ListMultilineComment.mos \
 loadClassContentString1.mos \
+loadClassContentString2.mos \
 loadFileInteractiveQualified.mos \
 matrices.mos \
 Modelica.Media.Examples.getComponents.mos \

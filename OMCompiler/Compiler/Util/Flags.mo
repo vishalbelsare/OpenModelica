@@ -551,6 +551,8 @@ constant DebugFlag DUMP_EVENTS = DEBUG_FLAG(193, "dumpEvents", false,
   Gettext.gettext("Dumps information about the detected event functions."));
 constant DebugFlag DUMP_RESIZABLE = DEBUG_FLAG(194, "dumpResizable", false,
   Gettext.gettext("Dumps information about resizable paremeter handling."));
+constant DebugFlag DUMP_SOLVE = DEBUG_FLAG(195, "dumpSolve", false,
+  Gettext.gettext("Dumps information about equation solving."));
 
 public
 // CONFIGURATION FLAGS
@@ -1360,6 +1362,16 @@ constant ConfigFlag DEBUG_FOLLOW_EQUATIONS = CONFIG_FLAG(155, "debugFollowEquati
 constant ConfigFlag MAX_SIZE_LINEARIZATION = CONFIG_FLAG(156, "maxSizeLinearization",
   NONE(), EXTERNAL(), INT_FLAG(1000), NONE(),
   Gettext.gettext("Sets the maximum system size for which linearization code is generated."));
+constant ConfigFlag RESIZABLE_ARRAYS = CONFIG_FLAG(157, "resizableArrays",
+  NONE(), EXTERNAL(), BOOL_FLAG(false), NONE(),
+  Gettext.gettext("Assumes all arrays are resizable. Only works with the new backend --newBackend."));
+constant ConfigFlag EVALUATE_STRUCTURAL_PARAMETERS = CONFIG_FLAG(158, "evaluateStructuralParameters",
+  NONE(), EXTERNAL(), STRING_FLAG("all"),
+  SOME(STRING_DESC_OPTION({
+    ("all", Gettext.gettext("Evaluates all structural parameters")),
+    ("strictlyNecessary", Gettext.gettext("Evaluates only structural parameters strictly required by the frontend"))
+  })),
+  Gettext.gettext("Sets which structural parameters are evaluated by the frontend."));
 
 function getFlags
   "Loads the flags with getGlobalRoot. Assumes flags have been loaded."

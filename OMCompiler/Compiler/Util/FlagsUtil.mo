@@ -250,7 +250,8 @@ constant list<Flags.DebugFlag> allDebugFlags = {
   Flags.DUMP_SLICE,
   Flags.VECTORIZE_BINDINGS,
   Flags.DUMP_EVENTS,
-  Flags.DUMP_RESIZABLE
+  Flags.DUMP_RESIZABLE,
+  Flags.DUMP_SOLVE
 };
 
 protected
@@ -413,7 +414,9 @@ constant list<Flags.ConfigFlag> allConfigFlags = {
   Flags.BASE_MODELICA_FORMAT,
   Flags.BASE_MODELICA_OPTIONS,
   Flags.DEBUG_FOLLOW_EQUATIONS,
-  Flags.MAX_SIZE_LINEARIZATION
+  Flags.MAX_SIZE_LINEARIZATION,
+  Flags.RESIZABLE_ARRAYS,
+  Flags.EVALUATE_STRUCTURAL_PARAMETERS
 };
 
 public function new

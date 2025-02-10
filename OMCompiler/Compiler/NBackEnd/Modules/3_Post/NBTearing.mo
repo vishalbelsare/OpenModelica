@@ -186,6 +186,16 @@ public
           status  = NBSolve.Status.IMPLICIT);
       then finalize(new_comp, dummy, funcTree, index, VariablePointers.empty(), EquationPointers.empty(), Pointer.create(0), kind);
 
+      case StrongComponent.RESIZABLE_COMPONENT() algorithm
+        new_comp := StrongComponent.ALGEBRAIC_LOOP(
+          idx     = index,
+          strict  = singleImplicit(Slice.getT(comp.var), Slice.getT(comp.eqn)),
+          casual  = NONE(),
+          linear  = false,
+          mixed   = false,
+          status  = NBSolve.Status.IMPLICIT);
+      then finalize(new_comp, dummy, funcTree, index, VariablePointers.empty(), EquationPointers.empty(), Pointer.create(0), kind);
+
       // do nothing otherwise
       else (comp, dummy, funcTree, index);
     end match;
@@ -317,11 +327,12 @@ protected
     Tearing strict;
   protected
     list<list<Slice<EquationPointer>>> acc;
+    UnorderedSet<VariablePointer> dummy_set = UnorderedSet.new(BVariable.hash, BVariable.equalName);
   algorithm
     comp := match comp
       case StrongComponent.ALGEBRAIC_LOOP(strict = strict) algorithm
         // inline potential records
-        acc := list(Inline.inlineRecordSliceEquation(eqn, variables, eq_index, true) for eqn in strict.residual_eqns);
+        acc := list(Inline.inlineRecordSliceEquation(eqn, variables, dummy_set, eq_index, true) for eqn in strict.residual_eqns);
 
         // create residual equations
         strict.residual_eqns := list(Slice.apply(eqn, function Equation.createResidual(new = true)) for eqn in List.flatten(acc));

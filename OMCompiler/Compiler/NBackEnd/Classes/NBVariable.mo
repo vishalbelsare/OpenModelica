@@ -65,6 +65,7 @@ public
   import NBAdjacency.Mapping;
   import BackendDAE = NBackendDAE;
   import BackendUtil = NBBackendUtil;
+  import BEquation = NBEquation;
   import NBEquation.Iterator;
   import BVariable = NBVariable;
 
@@ -84,6 +85,10 @@ public
   //               Single Variable constants and functions
   // ==========================================================================
   constant Variable DUMMY_VARIABLE = Variable.VARIABLE(ComponentRef.EMPTY(), Type.ANY(),
+    NFBinding.EMPTY_BINDING, NFPrefixes.Visibility.PUBLIC, NFAttributes.DEFAULT_ATTR,
+    {}, {}, NONE(), SCodeUtil.dummyInfo, NFBackendExtension.DUMMY_BACKEND_INFO);
+
+  constant Variable SUBST_VARIABLE = Variable.VARIABLE(NFBuiltin.SUBST_CREF, Type.ANY(),
     NFBinding.EMPTY_BINDING, NFPrefixes.Visibility.PUBLIC, NFAttributes.DEFAULT_ATTR,
     {}, {}, NONE(), SCodeUtil.dummyInfo, NFBackendExtension.DUMMY_BACKEND_INFO);
 
@@ -114,7 +119,7 @@ public
     String attr;
   algorithm
     attr := VariableAttributes.toString(var.backendinfo.attributes);
-    str := str + VariableKind.toString(var.backendinfo.varKind) + " (" + intString(Variable.size(var)) + ") " + Variable.toString(var) + (if attr == "" then "" else " " + attr);
+    str := str + VariableKind.toString(var.backendinfo.varKind) + " (" + intString(Variable.size(var, true)) + ") " + Variable.toString(var) + (if attr == "" then "" else " " + attr);
   end toString;
 
   function pointerToString
@@ -140,8 +145,24 @@ public
 
   function size
     input Pointer<Variable> var_ptr;
-    output Integer s = Variable.size(Pointer.access(var_ptr));
+    input Boolean resize = false;
+    output Integer s = Variable.size(Pointer.access(var_ptr), resize);
   end size;
+
+  function applyToType
+    input Pointer<Variable> var_ptr;
+    input typeFunc func;
+    partial function typeFunc
+      input output Type ty;
+    end typeFunc;
+  protected
+    Variable new, var = Pointer.access(var_ptr);
+  algorithm
+    new := Variable.applyToType(var, func);
+    if not referenceEq(var, new) then
+      Pointer.update(var_ptr, new);
+    end if;
+  end applyToType;
 
   function fromCref
     input ComponentRef cref;
@@ -415,6 +436,15 @@ public
     end match;
   end isClocked;
 
+  function isIterator
+    extends checkVar;
+  algorithm
+    b := match var.backendinfo.varKind
+      case VariableKind.ITERATOR() then true;
+      else false;
+    end match;
+  end isIterator;
+
   partial function getVarPartner
     input Pointer<Variable> var_ptr;
     output Option<Pointer<Variable>> partner;
@@ -578,8 +608,6 @@ public
 
   function isResizableParameter
     extends checkVar;
-  protected
-    InstNode node;
   algorithm
     b := match var.backendinfo
       case BackendExtension.BACKEND_INFO(varKind = VariableKind.PARAMETER(), annotations = BackendExtension.ANNOTATIONS(resizable = true))
@@ -587,6 +615,26 @@ public
       else false;
     end match;
   end isResizableParameter;
+
+  function updateResizableParameter
+    input Pointer<Variable> var_ptr;
+    input UnorderedMap<ComponentRef, Expression> optimal_values;
+  protected
+    Variable var = Pointer.access(var_ptr);
+    Option<Expression> val = UnorderedMap.get(var.name, optimal_values);
+  algorithm
+    _ := match (val, var.backendinfo)
+      local
+        Integer i;
+        VariableKind varKind;
+
+      case (SOME(Expression.INTEGER(i)), BackendExtension.BACKEND_INFO(varKind = varKind as VariableKind.PARAMETER(), annotations = BackendExtension.ANNOTATIONS(resizable = true))) algorithm
+        varKind.resize_value := SOME(i);
+        setVarKind(var_ptr, varKind);
+      then ();
+      else ();
+    end match;
+  end updateResizableParameter;
 
   function isResidual
     extends checkVar;
@@ -907,6 +955,18 @@ public
       else {};
     end match;
   end getRecordChildren;
+
+  function getRecordChildrenCref
+    input ComponentRef cref;
+    output list<ComponentRef> children;
+  protected
+    list<Subscript> subscripts;
+    list<Pointer<Variable>> arg_children;
+  algorithm
+    subscripts    := ComponentRef.subscriptsAllFlat(cref);
+    arg_children  := BVariable.getRecordChildren(getVarPointer(cref));
+    children      := list(ComponentRef.mergeSubscripts(subscripts, getVarName(child))  for child in arg_children);
+  end getRecordChildrenCref;
 
   function makeDummyState
     input Pointer<Variable> varPointer;
@@ -1304,6 +1364,41 @@ public
     end if;
   end hasEvaluableBinding;
 
+  function mapExp
+    input Pointer<Variable> var_ptr;
+    input BEquation.MapFuncExp funcExp;
+    input BEquation.MapFuncExpWrapper mapFunc = Expression.map;
+  protected
+    Variable var = Pointer.access(var_ptr);
+    Option<Expression> opt_start;
+    Expression binding, new_binding, start, new_start;
+    Boolean changed = false;
+  algorithm
+    // map binding
+    if isBound(var_ptr) then
+      binding     := Binding.getExp(var.binding);
+      new_binding := mapFunc(binding, funcExp);
+      if not referenceEq(binding, new_binding) then
+        var.binding := Binding.setExp(new_binding, var.binding);
+        changed     := true;
+      end if;
+    end if;
+
+    // map start exp
+    opt_start   := getStartAttribute(var_ptr);
+    if Util.isSome(opt_start) then
+      SOME(start) := opt_start;
+      new_start   := mapFunc(start, funcExp);
+
+      if not referenceEq(start, new_start) then
+        var         := setStartAttribute(var, new_start, true);
+        changed     := true;
+      end if;
+    end if;
+
+    if changed then Pointer.update(var_ptr, var); end if;
+  end mapExp;
+
   function setFixed
     input output Pointer<Variable> var_ptr;
     input Boolean b = true;
@@ -1472,7 +1567,7 @@ public
         length := 10;
       end if;
       if printEmpty or numberOfElements > 0 then
-        str := StringUtil.headline_4(str + " Variables (" + intString(numberOfElements) + "/" + intString(scalarSize(variables)) + ")");
+        str := StringUtil.headline_4(str + " Variables (" + intString(numberOfElements) + "/" + intString(scalarSize(variables, true)) + ")");
         for i in 1:numberOfElements loop
           if useMapping then
             (scal_start, _) := mapping[i];
@@ -1600,10 +1695,11 @@ public
     function scalarSize
       "returns the scalar size."
       input VariablePointers variables;
+      input Boolean resize = false;
       output Integer sz = 0;
     algorithm
       for var_ptr in toList(variables) loop
-        sz := sz + BVariable.size(var_ptr);
+        sz := sz + BVariable.size(var_ptr, resize);
       end for;
     end scalarSize;
 
@@ -1725,12 +1821,7 @@ public
       "Returns -1 if cref was deleted or cannot be found."
       input VariablePointers variables;
       input ComponentRef cref;
-      output Integer index;
-    algorithm
-      index := match UnorderedMap.get(cref, variables.map)
-        case SOME(index) then index;
-        case NONE() then -1;
-      end match;
+      output Integer index = UnorderedMap.getOrDefault(cref, variables.map, -1);
     end getVarIndex;
 
     function contains
@@ -1769,7 +1860,7 @@ public
         var := Pointer.access(var_ptr);
 
         if Type.isArray(var.ty) then
-          for cr in ComponentRef.scalarizeAll(ComponentRef.stripSubscriptsAll(var.name)) loop
+          for cr in ComponentRef.scalarizeAll(ComponentRef.stripSubscriptsAll(var.name), true) loop
             if Type.isComplex(ComponentRef.nodeType(cr)) then
               names := listAppend(ComponentRef.getRecordChildren(cr), names);
             else
@@ -2043,12 +2134,13 @@ public
 
     function scalarSize
       input VarData varData;
+      input Boolean resize = false;
       output Integer s;
     algorithm
       s := match varData
-        case VAR_DATA_SIM() then VariablePointers.scalarSize(varData.unknowns);
-        case VAR_DATA_JAC() then VariablePointers.scalarSize(varData.unknowns);
-        case VAR_DATA_HES() then VariablePointers.scalarSize(varData.unknowns);
+        case VAR_DATA_SIM() then VariablePointers.scalarSize(varData.unknowns, resize);
+        case VAR_DATA_JAC() then VariablePointers.scalarSize(varData.unknowns, resize);
+        case VAR_DATA_HES() then VariablePointers.scalarSize(varData.unknowns, resize);
       end match;
     end scalarSize;
 
@@ -2079,7 +2171,7 @@ public
           VariablePointers lambdaVars;
 
         case VAR_DATA_SIM() algorithm
-          tmp := "Variable Data Simulation (scalar unknowns: " + intString(VariablePointers.scalarSize(varData.unknowns)) + ")";
+          tmp := "Variable Data Simulation (scalar unknowns: " + intString(VariablePointers.scalarSize(varData.unknowns, true)) + ")";
           tmp := StringUtil.headline_2(tmp) + "\n";
           if not full then
             tmp := tmp + VariablePointers.toString(varData.unknowns, "Unknown", NONE(), false) +

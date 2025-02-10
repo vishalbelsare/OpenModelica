@@ -94,7 +94,7 @@ public
     input Variability var;
     output Dimension dim;
   algorithm
-    dim := match (exp, var)
+    dim := match exp
       local
         Expression e;
         Integer value;
@@ -102,20 +102,9 @@ public
         ComponentRef cref;
         Type ty;
 
-      case (_, Variability.NON_STRUCTURAL_PARAMETER) algorithm
-        e := Expression.map(exp, Expression.replaceResizableParameter);
-        e := SimplifyExp.simplify(e);
-        value := match e
-          case Expression.INTEGER(value) then value;
-          else algorithm
-            Error.assertion(false, getInstanceName() + " got invalid non structural parameter: " + Expression.toString(exp), sourceInfo());
-          then fail();
-        end match;
-      then RESIZABLE(value, NONE(), exp, var);
+      case Expression.INTEGER() then INTEGER(exp.value, var);
 
-      case (Expression.INTEGER(), _) then INTEGER(exp.value, var);
-
-      case (Expression.TYPENAME(ty = Type.ARRAY(elementType = ty)), _)
+      case Expression.TYPENAME(ty = Type.ARRAY(elementType = ty))
         then
           match ty
             case Type.BOOLEAN() then BOOLEAN();
@@ -127,15 +116,29 @@ public
                 fail();
           end match;
 
-      case (Expression.ARRAY(), _)
+      case Expression.ARRAY()
         guard Expression.arrayAllEqual(exp)
         then fromExp(Expression.arrayFirstScalar(exp), var);
 
-      case (Expression.SUBSCRIPTED_EXP(split = true), _)
+      case Expression.SUBSCRIPTED_EXP(split = true)
         guard Expression.isArray(exp.exp) and Expression.arrayAllEqual(exp.exp)
         then fromExp(Expression.arrayFirstScalar(exp.exp), var);
 
-      else EXP(exp, var);
+      else algorithm
+        e := SimplifyExp.simplify(exp);
+      then match e
+        // if it can be simplified to an integer its just an integer
+        case Expression.INTEGER(value) then INTEGER(value, var);
+        // if it can be simplified to an integer after replacing resizables its resizable
+        else algorithm
+          e := Expression.map(e, Expression.replaceResizableParameter);
+          e := SimplifyExp.simplify(e);
+        then match e
+          case Expression.INTEGER(value) then RESIZABLE(value, NONE(), exp, var);
+        // otherwise it is just an expression
+          else EXP(exp, var);
+        end match;
+      end match;
     end match;
   end fromExp;
 
@@ -194,12 +197,13 @@ public
       local
         Type ty;
 
-      case INTEGER() then DAE.DIM_INTEGER(dim.size);
-      case BOOLEAN() then DAE.DIM_BOOLEAN();
+      case INTEGER()    then DAE.DIM_INTEGER(dim.size);
+      case BOOLEAN()    then DAE.DIM_BOOLEAN();
       case ENUM(enumType = ty as Type.ENUMERATION())
         then DAE.DIM_ENUM(ty.typePath, ty.literals, listLength(ty.literals));
-      case EXP() then DAE.DIM_EXP(Expression.toDAE(dim.exp));
-      case UNKNOWN() then DAE.DIM_UNKNOWN();
+      case EXP()        then DAE.DIM_EXP(Expression.toDAE(dim.exp));
+      case RESIZABLE()  then DAE.DIM_EXP(Expression.toDAE(dim.exp));
+      case UNKNOWN()    then DAE.DIM_UNKNOWN();
     end match;
   end toDAE;
 
@@ -243,6 +247,7 @@ public
 
   function size
     input Dimension dim;
+    input Boolean resize = false;
     output Integer size;
   algorithm
     size := match dim
@@ -250,7 +255,7 @@ public
         Type ty;
 
       case INTEGER()    then dim.size;
-      case RESIZABLE()  then dim.size;
+      case RESIZABLE()  then if resize then Util.getOptionOrDefault(dim.opt_size, dim.size) else dim.size;
       case BOOLEAN()    then 2;
       case ENUM(enumType = ty as Type.ENUMERATION()) then listLength(ty.literals);
       else algorithm
@@ -264,10 +269,11 @@ public
   function sizesProduct
     "Returns the product of the given dimension sizes."
     input list<Dimension> dims;
+    input Boolean resize = false;
     output Integer outSize = 1;
   algorithm
     for dim in dims loop
-      outSize := outSize * Dimension.size(dim);
+      outSize := outSize * Dimension.size(dim, resize);
     end for;
   end sizesProduct;
 
@@ -669,7 +675,9 @@ public
   algorithm
     outDim := match dim
       case EXP() then fromExp(Ceval.evalExp(dim.exp, target), dim.var);
-      case RESIZABLE() then fromExp(Ceval.evalExp(dim.exp, target), dim.var);
+      case RESIZABLE() algorithm
+        dim.exp := Ceval.evalExp(dim.exp, target);
+      then dim;
       else dim;
     end match;
   end eval;

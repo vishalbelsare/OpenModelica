@@ -149,9 +149,14 @@ protected
         (variables, disc_eqns, knowns, initials, discretes, discrete_states, clocked_states, previous)
           := discreteFunc(variables, eqData.clocked, knowns, initials, discretes, discrete_states, clocked_states, previous, "clocked equations");
 
+        // collect clocked states from continuous equations
+        (variables, disc_eqns, knowns, initials, discretes, discrete_states, clocked_states, previous)
+          := discreteFunc(variables, eqData.continuous, knowns, initials, discretes, discrete_states, clocked_states, previous, "continuous equations");
+
         // collect discrete states from initial equations
         (variables, init_eqns, knowns, initials, discretes, discrete_states, clocked_states, previous)
           := discreteFunc(variables, eqData.initials, knowns, initials, discretes, discrete_states, clocked_states, previous, "initial equations");
+
 
         // update variable arrays
         varData.variables         := variables;
@@ -217,6 +222,7 @@ protected
   algorithm
     exp := match exp
       local
+        Expression res;
         ComponentRef state_cref, der_cref;
         Pointer<Variable> state_var, der_var;
 
@@ -224,17 +230,25 @@ protected
         arguments = {Expression.CREF(cref = state_cref)}))
         algorithm
           state_var := BVariable.getVarPointer(state_cref);
-          if BVariable.hasDerVar(state_var) then
-            // this derivative was already created -> the variable should already have a pointer to its derivative
-            der_cref := BVariable.getPartnerCref(state_cref, BVariable.getVarDer, scalarized);
+
+          if not BVariable.isContinuous(state_var, false) then
+            // if the variable is not continuous, its derivative is zero
+            res := Expression.makeZero(ComponentRef.getSubscriptedType(state_cref));
           else
-            (der_cref, der_var) := BVariable.makeDerVar(state_cref, scalarized);
-            state_var := BVariable.getVarPointer(state_cref);
-            BVariable.setStateDerivativeVar(state_var, der_var);
-            Pointer.update(acc_states, state_var :: Pointer.access(acc_states));
-            Pointer.update(acc_derivatives, der_var :: Pointer.access(acc_derivatives));
+            if BVariable.hasDerVar(state_var) then
+              // this derivative was already created -> the variable should already have a pointer to its derivative
+              der_cref := BVariable.getPartnerCref(state_cref, BVariable.getVarDer, scalarized);
+            else
+              // create new derivative variable
+              (der_cref, der_var) := BVariable.makeDerVar(state_cref, scalarized);
+              state_var := BVariable.getVarPointer(state_cref);
+              BVariable.setStateDerivativeVar(state_var, der_var);
+              Pointer.update(acc_states, state_var :: Pointer.access(acc_states));
+              Pointer.update(acc_derivatives, der_var :: Pointer.access(acc_derivatives));
+            end if;
+            res := Expression.fromCref(der_cref);
           end if;
-      then Expression.fromCref(der_cref);
+      then res;
 
       else exp;
     end match;
@@ -397,7 +411,7 @@ protected
       case Expression.CALL(call = Call.TYPED_CALL(fn = Function.FUNCTION(path = Absyn.IDENT(name = "change")), arguments = args))
       algorithm
         (new_exp, old_exp) := preFromArgs(args, acc_previous, scalarized, "change");
-      then Expression.RELATION(old_exp, Operator.makeNotEqual(Expression.typeOf(old_exp)), new_exp);
+      then Expression.RELATION(old_exp, Operator.makeNotEqual(Expression.typeOf(old_exp)), new_exp, -1);
 
       else exp;
     end match;
@@ -462,25 +476,19 @@ protected
     discrete_states := VariablePointers.removeList(acc_clocked_states, discrete_states);
 
     if Flags.isSet(Flags.DUMP_STATESELECTION_INFO) then
-      print(StringUtil.headline_4("[stateselection] Natural discrete states from " + context + ":"));
-      if listEmpty(acc_discrete_states) then
-        print("\t<no discrete states>\n\n");
-      else
+      if not listEmpty(acc_discrete_states) then
+        print(StringUtil.headline_4("[stateselection] Natural discrete states from " + context + ":"));
         print(List.toString(acc_discrete_states, BVariable.pointerToString, "", "\t", "\n\t", "\n") + "\n");
       end if;
-      print(StringUtil.headline_4("[stateselection] Natural clocked states from " + context + ":"));
-      if listEmpty(acc_clocked_states) then
-        print("\t<no clocked states>\n\n");
-      else
+      if not listEmpty(acc_clocked_states) then
+        print(StringUtil.headline_4("[stateselection] Natural clocked states from " + context + ":"));
         print(List.toString(acc_clocked_states, BVariable.pointerToString, "", "\t", "\n\t", "\n") + "\n");
       end if;
     end if;
 
     if Flags.isSet(Flags.DUMP_DISCRETEVARS_INFO) then
-      print(StringUtil.headline_4("[discreteinfo] pre() and previous() variables from " + context + ":"));
-      if listEmpty(acc_previous) then
-        print("\t<no pre/previous variables>\n\n");
-      else
+      if not listEmpty(acc_previous) then
+        print(StringUtil.headline_4("[discreteinfo] pre() and previous() variables from " + context + ":"));
         print(List.toString(acc_previous, BVariable.pointerToString, "", "\t", "\n\t", "\n") + "\n");
       end if;
     end if;
